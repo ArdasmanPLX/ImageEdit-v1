@@ -6,7 +6,7 @@
 
 This contains everything you need to run your app locally.
 
-View your app in AI Studio: https://ai.studio/apps/drive/1Az5YFz1liBkqyGKReRcFxI5E-COj_c16
+View app in: https://imagenedit-v1-593893850737.us-west1.run.app/
 
 ## Run Locally
 
