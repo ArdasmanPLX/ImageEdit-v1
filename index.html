@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Image Editor</title>
+    <link rel="stylesheet" href="index.css">
+    <script type="importmap">
+      {
+        "imports": {
+          "@google/genai": "https://esm.sh/@google/genai@1.0.0",
+          "jszip": "https://esm.sh/jszip@3.10.1"
+        }
+      }
+    </script>
+</head>
+<body>
+    <div class="app-container">
+        <aside id="side-panel">
+            <h2>История</h2>
+            <div id="history-gallery"></div>
+            <button id="gallery-btn" class="gallery-button">Галерея</button>
+        </aside>
+        <main>
+            <h1>PLAYRIX AI Image Editor</h1>
+            <p>Upload an image, describe the changes you want, and let the AI do the rest.</p>
+
+            <div id="controls" role="form" aria-labelledby="editor-title">
+                <h2 id="editor-title" class="visually-hidden">Image editing controls</h2>
+                <div id="image-upload-container">
+                    <div id="image-preview-container" role="button" tabindex="0" aria-label="Upload an image">
+                        <img id="image-preview" class="hidden" alt="Your uploaded image preview">
+                        <canvas id="mask-canvas"></canvas>
+                        <label id="upload-label">
+                            <span>Click, drag & drop, or paste image</span>
+                        </label>
+                    </div>
+                    <input type="file" id="image-upload" accept="image/*" hidden>
+
+                    <div id="reference-upload-area">
+                        <label for="reference-upload" class="button-like-label" role="button" tabindex="0">
+                            Add Reference Images (Optional)
+                        </label>
+                        <input type="file" id="reference-upload" accept="image/*" multiple hidden>
+                        <div id="reference-preview-container"></div>
+                    </div>
+
+                    <div id="inpaint-controls" class="hidden">
+                        <div class="inpaint-tool">
+                            <label for="brush-size">Brush Size:</label>
+                            <input type="range" id="brush-size-slider" min="5" max="100" value="40">
+                        </div>
+                        <div class="inpaint-tool-group">
+                            <button id="brush-mode-btn" class="tool-btn active" aria-pressed="true">Brush</button>
+                            <button id="eraser-mode-btn" class="tool-btn" aria-pressed="false">Eraser</button>
+                        </div>
+                        <div class="inpaint-tool-group">
+                            <button id="undo-mask-btn" class="tool-btn-secondary">Undo</button>
+                            <button id="clear-mask-btn" class="tool-btn-secondary">Clear</button>
+                            <button id="remove-mask-btn" class="tool-btn-secondary">Remove</button>
+                        </div>
+                    </div>
+                </div>
+                <div id="prompt-container">
+                    <div id="mode-tabs">
+                        <button id="tab-character" class="tab-btn active" data-mode="character" role="tab" aria-selected="true">Персонаж</button>
+                        <button id="tab-sketch" class="tab-btn" data-mode="sketch" role="tab" aria-selected="false">Скетч</button>
+                        <button id="tab-inpaint" class="tab-btn" data-mode="inpaint" role="tab" aria-selected="false">Маска</button>
+                        <button id="tab-match3" class="tab-btn" data-mode="match3" role="tab" aria-selected="false">Match3</button>
+                        <button id="tab-free" class="tab-btn" data-mode="free" role="tab" aria-selected="false">Свободный режим</button>
+                    </div>
+                    
+                    <div id="preset-buttons">
+                        <button id="preset-turn-side" class="preset-btn" disabled>Вид сбоку</button>
+                        <button id="preset-turn-34" class="preset-btn" disabled>Вид в 3/4</button>
+                        <button id="preset-turn-back" class="preset-btn" disabled>Вид со спины</button>
+                        <button id="preset-turn-front" class="preset-btn" disabled>Вид анфас</button>
+                        <button id="preset-emotion-ref" class="preset-btn" disabled>Изменить эмоцию</button>
+                        <button id="preset-emotion-sad" class="preset-btn" disabled>Эмоция: Грусть</button>
+                        <button id="preset-emotion-surprise" class="preset-btn" disabled>Эмоция: Удивление</button>
+                        <button id="preset-emotion-joy" class="preset-btn" disabled>Эмоция: Радость</button>
+                        <button id="preset-pose-sit" class="preset-btn" disabled>Поза: Сидит</button>
+                        <button id="preset-pose-dance" class="preset-btn" disabled>Поза: Танцует</button>
+                        <button id="preset-pose-gesture" class="preset-btn" disabled>Поза: Жест руками</button>
+                        <button id="preset-pose-ref" class="preset-btn" disabled>Поза по референсу</button>
+                        <button id="preset-turn-360" class="preset-btn" disabled>Поворот 360</button>
+                        <button id="preset-head-turns" class="preset-btn" disabled>Повороты головы</button>
+                    </div>
+
+                    <div id="match3-preset-buttons" class="hidden">
+                        <button id="preset-shine-10" class="preset-btn" disabled>Блеск 10%</button>
+                        <button id="preset-shine-15" class="preset-btn" disabled>Блеск 15%</button>
+                        <button id="preset-shine-20" class="preset-btn" disabled>Блеск 20%</button>
+                        <button id="preset-shine-25" class="preset-btn" disabled>Блеск 25%</button>
+                        <button id="preset-shine-30" class="preset-btn" disabled>Блеск 30%</button>
+                        <button id="preset-remove-bg" class="preset-btn" disabled>Удалить фон</button>
+                        <button id="preset-metal-30" class="preset-btn" disabled>Металл 30%</button>
+                        <button id="preset-metal-40" class="preset-btn" disabled>Металл 40%</button>
+                        <button id="preset-metal-50" class="preset-btn" disabled>Металл 50%</button>
+                        <button id="preset-metal-70" class="preset-btn" disabled>Металл 70%</button>
+                        <button id="preset-shadows" class="preset-btn" disabled>Усилить тени</button>
+                    </div>
+
+                    <label for="prompt-input" class="visually-hidden">Editing prompt</label>
+                    <textarea id="prompt-input" placeholder="e.g., add a party hat on the cat" rows="3"></textarea>
+
+                    <label for="negative-prompt-input" class="visually-hidden">Negative prompt</label>
+                    <textarea id="negative-prompt-input" placeholder="Negative prompt (e.g., ugly, blurry, text, watermark)" rows="2"></textarea>
+
+                    <div id="creativity-slider-container">
+                        <label for="creativity-slider">Creativity:</label>
+                        <input type="range" id="creativity-slider" min="0" max="1" step="0.1" value="0.9">
+                        <span id="creativity-value">0.9</span>
+                    </div>
+                    
+                    <div id="generation-count-selector">
+                        <label id="generation-count-label">Number of images:</label>
+                        <div role="group" aria-labelledby="generation-count-label">
+                            <button class="num-btn active" data-count="1" aria-pressed="true">1</button>
+                            <button class="num-btn" data-count="2" aria-pressed="false">2</button>
+                            <button class="num-btn" data-count="3" aria-pressed="false">3</button>
+                            <button class="num-btn" data-count="4" aria-pressed="false">4</button>
+                            <button class="num-btn" data-count="5" aria-pressed="false">5</button>
+                            <button class="num-btn" data-count="6" aria-pressed="false">6</button>
+                        </div>
+                    </div>
+
+                    <button id="generate-btn" aria-label="Generate edited image">Generate</button>
+                </div>
+            </div>
+
+            <div id="result-container" aria-live="polite">
+                <h2>Результат</h2>
+                <div id="image-gallery"></div>
+            </div>
+        </main>
+    </div>
+
+    <div id="gallery-modal" class="modal-hidden" role="dialog" aria-modal="true" aria-labelledby="gallery-title">
+        <div class="gallery-modal-content">
+            <div class="gallery-modal-header">
+                <h2 id="gallery-title">Галерея</h2>
+                <div class="gallery-modal-controls">
+                    <input type="text" id="filename-prefix" placeholder="Имя файла / архива (person)" aria-label="Filename prefix">
+                    <button id="download-selected-btn" disabled>Загрузить выбранное</button>
+                </div>
+                <button id="close-gallery-btn" class="close-btn" aria-label="Close gallery view">&times;</button>
+            </div>
+            <div id="gallery-grid"></div>
+        </div>
+    </div>
+    
+    <div id="fullscreen-modal" class="modal-hidden" role="dialog" aria-modal="true" aria-labelledby="fullscreen-image-alt">
+        <button id="close-modal-btn" class="close-btn" aria-label="Close fullscreen view">&times;</button>
+        <button id="prev-image-btn" class="nav-btn prev" aria-label="Previous image">&#10094;</button>
+        <img id="fullscreen-image" src="" alt="Fullscreen view of generated image">
+        <button id="next-image-btn" class="nav-btn next" aria-label="Next image">&#10095;</button>
+        <p id="fullscreen-image-alt" class="visually-hidden">Fullscreen view of generated image</p>
+    </div>
+
+    <div id="brush-cursor" class="hidden"></div>
+    <script type="module" src="index.tsx"></script>
+</body>
+</html>
