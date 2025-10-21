@@ -1,6 +1,4 @@
-<div align="center">
-<img width="1536" height="1024" alt="GHBanner" src="https://drive.google.com/file/d/1h856Jr6mweGeFrmAWfwoDwFJGlw-k32-/view?usp=sharing" />
-</div>
+Image Edit v1
 
 # Run and deploy your AI Studio app
 
