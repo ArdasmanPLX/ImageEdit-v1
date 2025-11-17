@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -23,26 +24,86 @@
         </aside>
         <main>
             <h1>PLAYRIX AI Image Editor</h1>
-            <p>Upload an image, describe the changes you want, and let the AI do the rest.</p>
+            <!-- Removed: <p>Upload an image, describe the changes you want, and let the AI do the rest.</p> -->
 
+            <div id="mode-tabs" role="tablist" aria-label="Select editing mode">
+                <button id="tab-character" class="tab-btn active" data-mode="character" role="tab" aria-selected="true">Персонаж</button>
+                <button id="tab-sketch" class="tab-btn" data-mode="sketch" role="tab" aria-selected="false">Свободный режим</button>
+                <button id="tab-inpaint" class="tab-btn" data-mode="inpaint" role="tab" aria-selected="false">Маска</button>
+                <button id="tab-lighting" class="tab-btn" data-mode="lighting" role="tab" aria-selected="false">Освещение</button>
+                <button id="tab-match3" class="tab-btn" data-mode="match3" role="tab" aria-selected="false">Match3</button>
+                <button id="tab-free" class="tab-btn" data-mode="free" role="tab" aria-selected="false">Генерация изображения</button>
+                <button id="tab-analyze" class="tab-btn" data-mode="analyze" role="tab" aria-selected="false">Анализ изображения</button>
+                <button id="tab-fqa" class="tab-btn" data-mode="fqa" role="tab" aria-selected="false">FQA</button>
+            </div>
+            
             <div id="controls" role="form" aria-labelledby="editor-title">
                 <h2 id="editor-title" class="visually-hidden">Image editing controls</h2>
                 <div id="image-upload-container">
-                    <div id="image-preview-container" role="button" tabindex="0" aria-label="Upload an image">
-                        <img id="image-preview" class="hidden" alt="Your uploaded image preview">
-                        <canvas id="mask-canvas"></canvas>
-                        <label id="upload-label">
-                            <span>Click, drag & drop, or paste image</span>
-                        </label>
+                    <div id="image-viewport">
+                        <div id="image-preview-container" role="button" tabindex="0" aria-label="Upload an image">
+                            <img id="image-preview" class="hidden" alt="Your uploaded image preview">
+                            <canvas id="mask-canvas"></canvas>
+                            <canvas id="lighting-overlay-canvas"></canvas>
+                             <div id="comparison-after-container" class="hidden">
+                                <img id="comparison-after-image" src="" alt="Generated image for comparison">
+                            </div>
+                            <div id="comparison-slider-handle" class="hidden"><div></div></div>
+                             <div id="upload-label">
+                                <span>Click, drag & drop, or paste an image</span>
+                            </div>
+                        </div>
+                         <div id="image-overlay-controls" class="hidden">
+                             <div class="control-group">
+                                <button id="toggle-comparison-btn" class="overlay-btn" aria-label="Toggle Before/After view" disabled>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M12 22a10 10 0 1 1 0-20 10 10 0 0 1 0 20z"></path>
+                                        <path d="M12 2v20"></path>
+                                    </svg>
+                                </button>
+                             </div>
+                             <div class="divider"></div>
+                            <div id="light-placement-tool" class="control-group">
+                                <button id="toggle-light-placement-btn" class="overlay-btn" aria-label="Toggle light source placement">
+                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M15.5 15.5A6.5 6.5 0 1 1 8.5 8.5a6.5 6.5 0 0 1 7 7z" />
+                                        <path d="M12 19v2M12 3v2" />
+                                        <path d="m4.93 4.93 1.41 1.41M17.66 17.66l1.41 1.41" />
+                                        <path d="M2 12h2M20 12h2" />
+                                        <path d="m4.93 19.07 1.41-1.41M17.66 6.34l1.41-1.41" />
+                                    </svg>
+                                </button>
+                                <button id="clear-light-sources-btn" class="overlay-btn clear hidden" aria-label="Clear all light sources">
+                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                    </svg>
+                                </button>
+                            </div>
+                            <div id="light-properties" class="control-group hidden">
+                                <label for="light-size-slider">Размер:</label>
+                                <input type="range" id="light-size-slider" min="5" max="50" value="15">
+                                <div id="light-shape-selector">
+                                    <input type="radio" id="shape-circle" name="light-shape" value="circle" checked>
+                                    <label for="shape-circle" class="shape-label" aria-label="Круг - общий источник света">●</label>
+                                    <input type="radio" id="shape-cone" name="light-shape" value="cone">
+                                    <label for="shape-cone" class="shape-label" aria-label="Конус - направленый источник света">▲</label>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     <input type="file" id="image-upload" accept="image/*" hidden>
-
-                    <div id="reference-upload-area">
-                        <label for="reference-upload" class="button-like-label" role="button" tabindex="0">
-                            Add Reference Images (Optional)
+                    
+                    <!-- Reference images upload area -->
+                    <div id="reference-upload-area" role="region" aria-labelledby="reference-upload-label" tabindex="0">
+                        <label for="reference-upload" id="reference-upload-label">
+                            <span>Add Reference Images (Optional) (Drag & Drop)</span>
                         </label>
-                        <input type="file" id="reference-upload" accept="image/*" multiple hidden>
-                        <div id="reference-preview-container"></div>
+                        <input type="file" id="reference-upload" accept="image/*" hidden multiple>
+                    </div>
+
+                    <!-- Reference images display area -->
+                    <div id="reference-preview-container" class="hidden">
+                        <!-- Label and images will be dynamically added here by JS -->
                     </div>
 
                     <div id="inpaint-controls" class="hidden">
@@ -62,13 +123,7 @@
                     </div>
                 </div>
                 <div id="prompt-container">
-                    <div id="mode-tabs">
-                        <button id="tab-character" class="tab-btn active" data-mode="character" role="tab" aria-selected="true">Персонаж</button>
-                        <button id="tab-sketch" class="tab-btn" data-mode="sketch" role="tab" aria-selected="false">Скетч</button>
-                        <button id="tab-inpaint" class="tab-btn" data-mode="inpaint" role="tab" aria-selected="false">Маска</button>
-                        <button id="tab-match3" class="tab-btn" data-mode="match3" role="tab" aria-selected="false">Match3</button>
-                        <button id="tab-free" class="tab-btn" data-mode="free" role="tab" aria-selected="false">Свободный режим</button>
-                    </div>
+                    <!-- Moved: <div id="mode-tabs"> -->
                     
                     <div id="preset-buttons">
                         <button id="preset-turn-side" class="preset-btn" disabled>Вид сбоку</button>
@@ -101,16 +156,71 @@
                         <button id="preset-shadows" class="preset-btn" disabled>Усилить тени</button>
                     </div>
 
-                    <label for="prompt-input" class="visually-hidden">Editing prompt</label>
-                    <textarea id="prompt-input" placeholder="e.g., add a party hat on the cat" rows="3"></textarea>
+                    <div id="prompt-input-wrapper">
+                        <label for="prompt-input" class="visually-hidden">Editing prompt</label>
+                        <textarea id="prompt-input" placeholder="Describe your desired changes..." rows="3"></textarea>
+                    </div>
 
-                    <label for="negative-prompt-input" class="visually-hidden">Negative prompt</label>
-                    <textarea id="negative-prompt-input" placeholder="Negative prompt (e.g., ugly, blurry, text, watermark)" rows="2"></textarea>
+                    <div id="negative-prompt-container">
+                        <label for="negative-prompt-input" class="visually-hidden">Negative prompt</label>
+                        <textarea id="negative-prompt-input" placeholder="Negative prompt (e.g., ugly, blurry, text, watermark)" rows="2"></textarea>
+                    </div>
+
+                    <div id="lighting-controls-container" class="hidden">
+                        <div class="lighting-control-group">
+                            <label for="temperature-slider">Температура (K):</label>
+                            <input type="range" id="temperature-slider" min="1000" max="10000" step="100" value="5000">
+                            <span id="temperature-value">5000</span>
+                        </div>
+                        <div class="lighting-control-group">
+                            <label for="light-color-picker">Цвет света:</label>
+                            <input type="color" id="light-color-picker" value="#FFFFFF">
+                        </div>
+
+                        <fieldset>
+                            <legend>Источник света</legend>
+                            <button class="lighting-preset-btn" data-prompt="a soft fill light from the left">Свет слева</button>
+                            <button class="lighting-preset-btn" data-prompt="a soft fill light from the right">Свет справа</button>
+                            <button class="lighting-preset-btn" data-prompt="a rim light">Контурный свет</button>
+                            <button class="lighting-preset-btn" data-prompt="the main light source is directly overhead">Свет сверху</button>
+                            <button class="lighting-preset-btn" data-prompt="a dramatic uplight from below">Свет снизу</button>
+                        </fieldset>
+
+                        <fieldset>
+                            <legend>Атмосфера</legend>
+                            <button class="lighting-preset-btn" data-prompt="Relight the scene for a bright summer morning">Летнее утро</button>
+                            <button class="lighting-preset-btn" data-prompt="Relight the scene for a warm autumn evening (golden hour)">Осенний вечер</button>
+                            <button class="lighting-preset-btn" data-prompt="Relight the scene for a cool winter noon with crisp shadows">Зимний полдень</button>
+                            <button class="lighting-preset-btn" data-prompt="Relight the scene for a dramatic, moody dusk">Сумерки</button>
+                        </fieldset>
+                        
+                        <fieldset>
+                            <legend>Стиль света</legend>
+                            <button class="lighting-preset-btn" data-prompt="Change the lighting to soft, diffused studio lighting">Студийный</button>
+                            <button class="lighting-preset-btn" data-prompt="Change the lighting to harsh, direct sunlight with strong shadows">Прямой солнечный</button>
+                            <button class="lighting-preset-btn" data-prompt="Change the lighting to match an overcast day with very soft, flat light">Пасмурный день</button>
+                            <button class="lighting-preset-btn" data-prompt="Relight with a single, cozy, warm room lamp">Комнатная лампа</button>
+                        </fieldset>
+
+                        <button id="preset-3d-lighting" class="lighting-preset-btn wide-btn" data-prompt="add 3D lighting to the scene as if it were a volumetric model">3D Lighting</button>
+                    </div>
+
 
                     <div id="creativity-slider-container">
                         <label for="creativity-slider">Creativity:</label>
                         <input type="range" id="creativity-slider" min="0" max="1" step="0.1" value="0.9">
                         <span id="creativity-value">0.9</span>
+                    </div>
+
+                    <div id="aspect-ratio-selector" class="hidden">
+                        <label id="aspect-ratio-label">Соотношение сторон:</label>
+                        <div role="group" aria-labelledby="aspect-ratio-label">
+                            <button class="aspect-ratio-btn active" data-ratio="1:1" aria-pressed="true">1:1</button>
+                            <button class="aspect-ratio-btn" data-ratio="3:4" aria-pressed="false">3:4</button>
+                            <button class="aspect-ratio-btn" data-ratio="4:3" aria-pressed="false">4:3</button>
+                            <button class="aspect-ratio-btn" data-ratio="9:16" aria-pressed="false">9:16</button>
+                            <button class="aspect-ratio-btn" data-ratio="16:9" aria-pressed="false">16:9</button>
+                        </div>
                     </div>
                     
                     <div id="generation-count-selector">
@@ -129,6 +239,33 @@
                 </div>
             </div>
 
+            <div id="fqa-content-container" class="hidden">
+                <h2>Часто задаваемые вопросы</h2>
+                <div class="fqa-section">
+                    <h3>Для чего нужен этот редактор изображений с ИИ?</h3>
+                    <p>Этот инструмент использует модели Google Gemini AI, чтобы помочь вам редактировать и генерировать изображения. Вы можете загрузить базовое изображение и описать изменения, использовать референсные изображения или генерировать совершенно новые изображения с нуля.</p>
+                </div>
+                <div class="fqa-section">
+                    <h3>Что означают разные режимы?</h3>
+                    <ul>
+                        <li><strong>Персонаж:</strong> Редактируйте существующие изображения с помощью конкретных подсказок и пресетов, ориентированных на персонажей.</li>
+                        <li><strong>Свободный режим:</strong> (Заполнитель - функциональность пока не реализована)</li>
+                        <li><strong>Маска:</strong> Используйте кисть, чтобы маскировать области загруженного изображения, указывая, где должны произойти изменения.</li>
+                        <li><strong>Match3:</strong> (Заполнитель - функциональность пока не реализована)</li>
+                        <li><strong>Генерация изображения:</strong> Генерируйте изображения из текстового запроса, с использованием необязательных референсных изображений, без необходимости в базовом изображении.</li>
+                        <li><strong>Анализ изображения:</strong> Загрузите основное изображение и одно или несколько референсных изображений, затем задайте ИИ вопрос для получения текстового анализа и сравнения. Это позволяет получать детальные описания, идентификацию объектов и сравнительный анализ содержимого между основным и референсными изображениями.</li>
+                    </ul>
+                </div>
+                <div class="fqa-section">
+                    <h3>Как использовать референсные изображения?</h3>
+                    <p>Перетащите или нажмите на область "Добавить референсные изображения", чтобы загрузить одно или несколько референсных изображений. Они могут служить руководством для процесса генерации или редактирования ИИ, в зависимости от активного режима.</p>
+                </div>
+                <div class="fqa-section">
+                    <h3>Что такое "Креативность"?</h3>
+                    <p>Ползунок креативности управляет "температурой" модели ИИ. Более высокие значения (ближе к 1.0) приведут к более разнообразным и креативным результатам, в то время как более низкие значения (ближе к 0.0) будут производить более предсказуемые и похожие результаты.</p>
+                </div>
+            </div>
+
             <div id="result-container" aria-live="polite">
                 <h2>Результат</h2>
                 <div id="image-gallery"></div>
@@ -141,21 +278,21 @@
             <div class="gallery-modal-header">
                 <h2 id="gallery-title">Галерея</h2>
                 <div class="gallery-modal-controls">
-                    <input type="text" id="filename-prefix" placeholder="Имя файла / архива (person)" aria-label="Filename prefix">
+                    <input type="text" id="filename-prefix" placeholder="Имя файла / Название архива (персонаж)" aria-label="Префикс имени файла">
                     <button id="download-selected-btn" disabled>Загрузить выбранное</button>
                 </div>
-                <button id="close-gallery-btn" class="close-btn" aria-label="Close gallery view">&times;</button>
+                <button id="close-gallery-btn" class="close-btn" aria-label="Закрыть просмотр галереи">&times;</button>
             </div>
             <div id="gallery-grid"></div>
         </div>
     </div>
     
     <div id="fullscreen-modal" class="modal-hidden" role="dialog" aria-modal="true" aria-labelledby="fullscreen-image-alt">
-        <button id="close-modal-btn" class="close-btn" aria-label="Close fullscreen view">&times;</button>
-        <button id="prev-image-btn" class="nav-btn prev" aria-label="Previous image">&#10094;</button>
-        <img id="fullscreen-image" src="" alt="Fullscreen view of generated image">
-        <button id="next-image-btn" class="nav-btn next" aria-label="Next image">&#10095;</button>
-        <p id="fullscreen-image-alt" class="visually-hidden">Fullscreen view of generated image</p>
+        <button id="close-modal-btn" class="close-btn" aria-label="Закрыть полноэкранный просмотр">&times;</button>
+        <button id="prev-image-btn" class="nav-btn prev" aria-label="Предыдущее изображение">&#10094;</button>
+        <img id="fullscreen-image" src="" alt="Полноэкранный просмотр сгенерированного изображения">
+        <button id="next-image-btn" class="nav-btn next" aria-label="Следующее изображение">&#10095;</button>
+        <p id="fullscreen-image-alt" class="visually-hidden">Полноэкранный просмотр сгенерированного изображения</p>
     </div>
 
     <div id="brush-cursor" class="hidden"></div>

@@ -1,3 +1,5 @@
+
+
 body {
   font-family: 'Segoe UI', 'Roboto', sans-serif;
   margin: 0;
@@ -154,8 +156,17 @@ p {
 #image-upload-container {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 1.5rem; /* Adjusted gap for better spacing */
   width: 100%;
+}
+
+#image-upload-container.hidden {
+    display: none !important;
+}
+
+#image-viewport {
+    position: relative;
+    width: 100%;
 }
 
 #image-preview-container {
@@ -194,7 +205,7 @@ p {
   display: none;
 }
 
-#mask-canvas {
+#mask-canvas, #lighting-overlay-canvas {
     position: absolute;
     top: 0;
     left: 0;
@@ -206,10 +217,16 @@ p {
 #image-preview-container.inpaint-active {
     cursor: none;
 }
-
 #image-preview-container.inpaint-active #mask-canvas {
     pointer-events: auto;
 }
+#image-preview-container.light-placement-active {
+    cursor: crosshair;
+}
+#image-preview-container.light-placement-active #lighting-overlay-canvas {
+    pointer-events: auto;
+}
+
 
 #inpaint-controls {
     display: flex;
@@ -250,6 +267,10 @@ p {
 .tool-btn:hover:not(.active), .tool-btn-secondary:hover {
     background-color: #454545;
 }
+.tool-btn-secondary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
 
 #upload-label {
   position: absolute;
@@ -267,20 +288,14 @@ p {
   padding: 1rem;
 }
 
-/* In inpaint mode, the label should not interfere with drawing */
-#image-preview-container.inpaint-active #upload-label {
-    pointer-events: none;
-}
-
 #image-preview-container:hover #upload-label, #image-preview-container.drag-over #upload-label {
     background-color: rgba(74, 144, 226, 0.1);
     color: #eee;
 }
 
-/* Hide label when image is visible */
-#image-preview:not(.hidden) + #mask-canvas + #upload-label {
-  opacity: 0;
-  pointer-events: none;
+/* Hide label when image is visible via class */
+#image-preview-container.has-image #upload-label {
+  display: none;
 }
 
 
@@ -292,11 +307,14 @@ p {
   width: 100%;
 }
 
+/* Updated styles for #mode-tabs to position it correctly outside #prompt-container */
 #mode-tabs {
     display: flex;
+    justify-content: center; /* Center tabs horizontally */
     gap: 0.5rem;
-    margin-bottom: 1rem;
+    margin: 1.5rem auto 1.5rem auto; /* Top, Right, Bottom, Left margins */
     border-bottom: 1px solid #333;
+    max-width: fit-content; /* Ensure tabs only take up necessary width */
 }
 
 .tab-btn {
@@ -354,15 +372,96 @@ textarea#prompt-input:focus, textarea#negative-prompt-input:focus {
     font-size: 0.9rem;
 }
 
-#creativity-slider {
+#lighting-controls-container {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    color: #ccc;
+}
+.lighting-control-group {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 0.9rem;
+}
+#creativity-slider,
+#temperature-slider {
     flex-grow: 1;
 }
 
-#creativity-value {
+#creativity-value,
+#temperature-value {
     font-weight: bold;
-    min-width: 2.5ch; /* Reserve space for 3 characters like '0.9' */
+    min-width: 3.5ch;
     text-align: right;
 }
+
+#light-color-picker {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    width: 40px;
+    height: 24px;
+    background-color: transparent;
+    border: 1px solid #444;
+    border-radius: 4px;
+    cursor: pointer;
+}
+#light-color-picker::-webkit-color-swatch {
+    border-radius: 3px;
+    border: none;
+}
+#light-color-picker::-moz-color-swatch {
+    border-radius: 3px;
+    border: none;
+}
+
+
+#lighting-controls-container fieldset {
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0;
+}
+#lighting-controls-container legend {
+    padding: 0 0.5rem;
+    color: #aaa;
+    font-size: 0.85rem;
+    font-weight: bold;
+}
+
+.lighting-preset-btn {
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    border: 1px solid #444;
+    background-color: #3a3a3a;
+    color: #ccc;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: background-color 0.2s, border-color 0.2s;
+}
+.lighting-preset-btn:hover:not(:disabled) {
+    background-color: #454545;
+}
+.lighting-preset-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.wide-btn {
+    flex-basis: 100%;
+    background-color: #4a90e2;
+    color: white;
+    border-color: #4a90e2;
+    font-weight: bold;
+}
+.wide-btn:hover:not(:disabled) {
+    background-color: #357abd;
+}
+
 
 #preset-buttons, #match3-preset-buttons {
     display: flex;
@@ -392,29 +491,78 @@ textarea#prompt-input:focus, textarea#negative-prompt-input:focus {
 }
 
 #reference-upload-area {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
     width: 100%;
-}
-
-.button-like-label {
-    padding: 0.5rem 1rem;
-    border-radius: 6px;
-    border: 1px solid #444;
+    min-height: 80px;
+    border: 2px dashed #444;
+    border-radius: 8px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    overflow: hidden;
     background-color: #2a2a2a;
-    color: #ccc;
-    text-align: center;
     cursor: pointer;
-    transition: background-color 0.2s, border-color 0.2s;
+    transition: border-color 0.2s, background-color 0.2s;
+    margin-top: 1rem; /* Added margin to separate from main image container */
 }
 
-.button-like-label:hover {
-    background-color: #333;
-    border-color: #555;
+#reference-upload-area:hover, #reference-upload-area:focus-within {
+    border-color: #4a90e2;
 }
+
+#reference-upload-area.drag-over {
+    border-color: #4a90e2;
+    border-style: solid;
+    background-color: rgba(74, 144, 226, 0.1);
+}
+
+#reference-upload-label {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column; /* Changed to column to stack text */
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    color: #888;
+    transition: background-color 0.2s, color 0.2s;
+    text-align: center;
+    padding: 1rem;
+    font-size: 0.9rem;
+}
+
+/* No .primary-text or .secondary-text rules needed anymore */
+
+#reference-upload-area:hover #reference-upload-label, #reference-upload-area.drag-over #reference-upload-label {
+    background-color: rgba(74, 144, 226, 0.1);
+    color: #eee;
+}
+
 
 #reference-preview-container {
+    display: flex; /* Changed to flex for vertical layout with label */
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 0.5rem 0; /* Add some vertical padding */
+    border-top: 1px solid #333; /* Separator from main image */
+    margin-top: 1rem; /* Space above */
+}
+
+#reference-preview-container.hidden {
+    display: none !important;
+}
+
+#reference-image-label {
+    color: #ccc;
+    font-size: 0.95rem;
+    font-weight: bold;
+    margin-bottom: 0.5rem;
+}
+
+.reference-grid { /* New container for the actual thumbnails */
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
     gap: 0.5rem;
@@ -466,7 +614,7 @@ textarea#prompt-input:focus, textarea#negative-prompt-input:focus {
     background-color: #c62828;
 }
 
-#generation-count-selector {
+#generation-count-selector, #aspect-ratio-selector {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -474,17 +622,19 @@ textarea#prompt-input:focus, textarea#negative-prompt-input:focus {
     margin-top: 0.5rem;
 }
 
-#generation-count-selector label {
+#generation-count-selector label, #aspect-ratio-selector label {
     color: #ccc;
     font-size: 0.9rem;
+    flex-shrink: 0;
 }
 
-#generation-count-selector [role="group"] {
+#generation-count-selector [role="group"], #aspect-ratio-selector [role="group"] {
     display: flex;
+    flex-wrap: wrap; /* Allow wrapping for many buttons */
     gap: 0.5rem;
 }
 
-.num-btn {
+.num-btn, .aspect-ratio-btn {
     padding: 0.5rem;
     min-width: 40px;
     border-radius: 6px;
@@ -497,14 +647,14 @@ textarea#prompt-input:focus, textarea#negative-prompt-input:focus {
     text-align: center;
 }
 
-.num-btn.active {
+.num-btn.active, .aspect-ratio-btn.active {
     background-color: #4a90e2;
     border-color: #4a90e2;
     color: white;
     font-weight: bold;
 }
 
-.num-btn:hover:not(.active) {
+.num-btn:hover:not(.active), .aspect-ratio-btn:hover:not(.active) {
     background-color: #454545;
 }
 
@@ -592,6 +742,17 @@ button#generate-btn:disabled {
     grid-column: 1 / -1;
 }
 
+#image-gallery .raw-text-output {
+    text-align: left;
+    white-space: pre-wrap;
+    font-family: 'Consolas', 'Monaco', monospace;
+    background-color: #2a2a2a;
+    padding: 1rem;
+    border-radius: 8px;
+    color: #e0e0e0;
+    overflow-x: auto;
+}
+
 #image-gallery .error {
     color: #ff6b6b;
 }
@@ -611,6 +772,168 @@ button#generate-btn:disabled {
   white-space: nowrap;
   border: 0;
 }
+
+#image-overlay-controls {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: rgba(30, 30, 30, 0.85);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-radius: 999px;
+    padding: 8px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    z-index: 10;
+    transition: opacity 0.3s;
+    pointer-events: auto;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.control-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.divider {
+    width: 1px;
+    height: 24px;
+    background-color: rgba(255, 255, 255, 0.2);
+    margin: 0 8px;
+}
+
+
+.overlay-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: none;
+    background-color: transparent;
+    color: #e0e0e0;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: background-color 0.2s, color 0.2s;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 0;
+}
+.overlay-btn svg {
+    width: 22px;
+    height: 22px;
+}
+
+.overlay-btn.active {
+    background-color: #4a90e2;
+    color: white;
+}
+.overlay-btn.clear:hover {
+    background-color: #e53935;
+}
+.overlay-btn:hover:not(.active) {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+.overlay-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    background-color: transparent;
+}
+
+
+#light-properties {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #ccc;
+    font-size: 0.9rem;
+}
+#light-size-slider {
+    width: 80px;
+}
+
+#light-shape-selector {
+    display: flex;
+    border: 1px solid #555;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+#light-shape-selector input[type="radio"] {
+    display: none;
+}
+
+#light-shape-selector .shape-label {
+    padding: 4px 8px;
+    cursor: pointer;
+    background-color: #3a3a3a;
+    transition: background-color 0.2s;
+}
+
+#light-shape-selector input[type="radio"]:checked + .shape-label {
+    background-color: #4a90e2;
+}
+
+/* Before/After Slider Styles */
+#comparison-after-container {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 50%; /* Initial position */
+    overflow: hidden;
+    pointer-events: none;
+}
+#comparison-after-image {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 100%;
+    max-width: none; /* Override max-width to fill the clipped container */
+    object-fit: cover;
+}
+
+#comparison-slider-handle {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 4px;
+    height: 100%;
+    background-color: rgba(255, 255, 255, 0.7);
+    cursor: ew-resize;
+    transform: translateX(-50%);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 5;
+}
+#comparison-slider-handle div {
+    width: 40px;
+    height: 40px;
+    border: 2px solid rgba(255, 255, 255, 0.7);
+    border-radius: 50%;
+    background-color: rgba(30, 30, 30, 0.5);
+    display: flex;
+    justify-content: space-evenly;
+    align-items: center;
+    font-size: 1.5rem;
+    color: white;
+}
+#comparison-slider-handle div::before, #comparison-slider-handle div::after {
+    content: "◀";
+    transform: scaleX(0.5);
+}
+#comparison-slider-handle div::after {
+    content: "▶";
+}
+#image-viewport.grabbing, #image-viewport.grabbing #lighting-overlay-canvas {
+    cursor: grabbing;
+}
+
 
 @media (max-width: 1024px) {
   .app-container {
@@ -951,4 +1274,51 @@ button#generate-btn:disabled {
     transform: translate(-50%, -50%); /* Center on the mouse pointer */
     z-index: 1001; /* Ensure it's on top of the canvas */
     mix-blend-mode: difference; /* Makes it visible on any background */
+}
+
+#fqa-content-container {
+    background-color: #1e1e1e;
+    padding: 2rem;
+    border-radius: 12px;
+    border: 1px solid #333;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+#fqa-content-container h2 {
+    text-align: left;
+    margin-bottom: 1rem;
+    color: #eee;
+    border-bottom: 1px solid #333;
+    padding-bottom: 0.75rem;
+}
+
+.fqa-section {
+    margin-bottom: 1rem;
+}
+
+.fqa-section h3 {
+    color: #4a90e2;
+    font-size: 1.25rem;
+    margin-top: 0;
+    margin-bottom: 0.5rem;
+    text-align: left;
+}
+
+.fqa-section p, .fqa-section ul {
+    color: #ccc;
+    font-size: 1rem;
+    line-height: 1.6;
+    margin-bottom: 0.5rem;
+    text-align: left;
+}
+
+.fqa-section ul {
+    list-style-type: disc;
+    padding-left: 20px;
+}
+
+.fqa-section li strong {
+    color: #e0e0e0;
 }
