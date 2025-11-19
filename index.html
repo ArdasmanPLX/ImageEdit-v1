@@ -52,6 +52,7 @@
                              <div id="upload-label">
                                 <span>Click, drag & drop, or paste an image</span>
                             </div>
+                            <button id="clear-image-btn" class="hidden" aria-label="Remove uploaded image" title="Remove image">&times;</button>
                         </div>
                          <div id="image-overlay-controls" class="hidden">
                              <div class="control-group">
@@ -159,6 +160,11 @@
                     <div id="prompt-input-wrapper">
                         <label for="prompt-input" class="visually-hidden">Editing prompt</label>
                         <textarea id="prompt-input" placeholder="Describe your desired changes..." rows="3"></textarea>
+                        <button id="magic-enhance-btn" class="magic-btn" aria-label="Enhance prompt with AI" title="Enhance prompt with AI">
+                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+                            </svg>
+                        </button>
                     </div>
 
                     <div id="negative-prompt-container">
@@ -289,8 +295,18 @@
     
     <div id="fullscreen-modal" class="modal-hidden" role="dialog" aria-modal="true" aria-labelledby="fullscreen-image-alt">
         <button id="close-modal-btn" class="close-btn" aria-label="Закрыть полноэкранный просмотр">&times;</button>
+        <div class="fullscreen-actions">
+             <button id="copy-image-btn" class="action-btn" title="Copy to Clipboard">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+             </button>
+        </div>
         <button id="prev-image-btn" class="nav-btn prev" aria-label="Предыдущее изображение">&#10094;</button>
-        <img id="fullscreen-image" src="" alt="Полноэкранный просмотр сгенерированного изображения">
+        <div class="fullscreen-content">
+            <img id="fullscreen-image" src="" alt="Полноэкранный просмотр сгенерированного изображения">
+        </div>
         <button id="next-image-btn" class="nav-btn next" aria-label="Следующее изображение">&#10095;</button>
         <p id="fullscreen-image-alt" class="visually-hidden">Полноэкранный просмотр сгенерированного изображения</p>
     </div>
