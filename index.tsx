@@ -1,3 +1,4 @@
+
 /**
  * @license
  * Copyright 2025 Google LLC
@@ -44,14 +45,11 @@ if (appContainer) {
   const negativePromptContainer = appContainer.querySelector<HTMLDivElement>('#negative-prompt-container'); // Container for negative prompt
   const creativitySliderContainer = appContainer.querySelector<HTMLDivElement>('#creativity-slider-container'); // Container for creativity slider
   const generationCountSelector = appContainer.querySelector<HTMLDivElement>('#generation-count-selector'); // Container for generation count
-  
+  const clearImageBtn = appContainer.querySelector<HTMLButtonElement>('#clear-image-btn'); // NEW: Clear image button
+
   // Aspect Ratio selector elements
   const aspectRatioSelector = appContainer.querySelector<HTMLDivElement>('#aspect-ratio-selector');
   const aspectRatioButtons = appContainer.querySelectorAll<HTMLButtonElement>('.aspect-ratio-btn');
-  
-  // Magic Prompt Button
-  const magicEnhanceBtn = appContainer.querySelector<HTMLButtonElement>('#magic-enhance-btn');
-  const clearMainImageBtn = appContainer.querySelector<HTMLButtonElement>('#clear-image-btn');
 
   // Lighting elements
   const imageViewport = appContainer.querySelector<HTMLDivElement>('#image-viewport');
@@ -90,7 +88,6 @@ if (appContainer) {
   const closeModalBtn = document.querySelector<HTMLButtonElement>('#close-modal-btn');
   const prevImageBtn = document.querySelector<HTMLButtonElement>('#prev-image-btn');
   const nextImageBtn = document.querySelector<HTMLButtonElement>('#next-image-btn');
-  const copyImageBtn = document.querySelector<HTMLButtonElement>('#copy-image-btn');
   
   // Gallery Modal elements
   const galleryModal = document.querySelector<HTMLDivElement>('#gallery-modal');
@@ -184,50 +181,6 @@ if (appContainer) {
         currentImageIndex++;
         updateModalContent();
     }
-  };
-
-  const copyImageToClipboard = async () => {
-      if (currentGallery.length === 0 || currentImageIndex < 0) return;
-      
-      const imagePart = currentGallery[currentImageIndex];
-      try {
-          // Convert image to PNG Blob for clipboard compatibility (fixes JPEG issues in some browsers)
-          const img = new Image();
-          await new Promise((resolve, reject) => {
-              img.onload = resolve;
-              img.onerror = reject;
-              img.src = `data:${imagePart.mimeType};base64,${imagePart.data}`;
-          });
-
-          const canvas = document.createElement('canvas');
-          canvas.width = img.naturalWidth;
-          canvas.height = img.naturalHeight;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) throw new Error('Could not get canvas context');
-          
-          ctx.drawImage(img, 0, 0);
-          
-          const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
-          if (!blob) throw new Error('Failed to create PNG blob');
-
-          await navigator.clipboard.write([
-              new ClipboardItem({
-                  'image/png': blob
-              })
-          ]);
-          
-          // Visual feedback
-          if (copyImageBtn) {
-              const originalHtml = copyImageBtn.innerHTML;
-              copyImageBtn.innerHTML = '<span style="font-size: 1.2rem;">✓</span>';
-              setTimeout(() => {
-                  copyImageBtn.innerHTML = originalHtml;
-              }, 2000);
-          }
-      } catch (err) {
-          console.error('Failed to copy image: ', err);
-          alert('Failed to copy image to clipboard. ' + err);
-      }
   };
 
   const updateDownloadButtonState = () => {
@@ -486,18 +439,6 @@ if (appContainer) {
       });
     }
 
-    // Magic Enhance Button state
-    if (magicEnhanceBtn) {
-        // Enable only if there is text to enhance
-        magicEnhanceBtn.disabled = !isPromptFilled;
-        if (currentMode === 'analyze') {
-             magicEnhanceBtn.disabled = true; // Enhance prompt doesn't make sense for questions
-             magicEnhanceBtn.classList.add('hidden');
-        } else {
-             magicEnhanceBtn.classList.remove('hidden');
-        }
-    }
-
   };
 
   const fileToImagePart = (file: File): Promise<ImagePart> => {
@@ -556,40 +497,6 @@ if (appContainer) {
         temperatureSlider.disabled = false;
     }
 };
-  
-  const enhancePrompt = async () => {
-      if (!promptInput || !promptInput.value.trim() || !magicEnhanceBtn) return;
-
-      const originalText = promptInput.value;
-      magicEnhanceBtn.disabled = true;
-      const originalIcon = magicEnhanceBtn.innerHTML;
-      magicEnhanceBtn.innerHTML = '...';
-
-      try {
-          const response = await ai.models.generateContent({
-              model: 'gemini-2.5-flash',
-              contents: {
-                  parts: [
-                      { text: `Expand the following image generation prompt to be more descriptive, artistic, and detailed, suitable for a high-quality image generation model. Keep it under 100 words. Preserve the original intent. Prompt: "${originalText}"` }
-                  ]
-              },
-              config: {
-                  temperature: 0.7,
-              }
-          });
-
-          const enhancedText = response.text.trim();
-          if (enhancedText) {
-              promptInput.value = enhancedText;
-              updateButtonState();
-          }
-      } catch (error) {
-          console.error("Error enhancing prompt:", error);
-      } finally {
-          magicEnhanceBtn.innerHTML = originalIcon;
-          updateButtonState(); // Re-evaluate disable state
-      }
-  };
 
   const hideComparisonView = () => {
     if (comparisonAfterContainer && comparisonSliderHandle && toggleComparisonBtn) {
@@ -598,26 +505,6 @@ if (appContainer) {
         comparisonSliderHandle.classList.add('hidden');
         toggleComparisonBtn.classList.remove('active');
         if (comparisonAfterImage) comparisonAfterImage.src = ''; // Clear image
-    }
-  };
-
-  const clearMask = () => {
-    if (maskCanvas) {
-      const ctx = maskCanvas.getContext('2d');
-      if (ctx) {
-        ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-      }
-    }
-    maskHistory = [];
-  };
-
-  const clearLightMarkers = () => {
-    lightMarkers = [];
-    if (lightingOverlayCanvas) {
-      const ctx = lightingOverlayCanvas.getContext('2d');
-      if (ctx) {
-        ctx.clearRect(0, 0, lightingOverlayCanvas.width, lightingOverlayCanvas.height);
-      }
     }
   };
 
@@ -633,15 +520,12 @@ if (appContainer) {
 
       imagePreview.src = `data:${imagePart.mimeType};base64,${imagePart.data}`;
       imagePreview.classList.remove('hidden');
+      if (clearImageBtn) clearImageBtn.classList.remove('hidden'); // Show clear button
       clearMask();
       clearLightMarkers();
       hideComparisonView();
       updateButtonState();
       updateMainUploadLabel();
-      
-      if (clearMainImageBtn) {
-          clearMainImageBtn.classList.remove('hidden');
-      }
 
       // If in lighting mode, analyze the image
       if (currentMode === 'lighting') {
@@ -697,13 +581,14 @@ if (appContainer) {
   };
 
   const processMainImageFile = async (file: File | null) => {
-    if (!file || (file.type && !file.type.startsWith('image/'))) {
+    if (!file || !file.type.startsWith('image/')) {
         uploadedImage = null;
-        if (imagePreview) imagePreview.classList.add('hidden');
+        if (imagePreview) {
+            imagePreview.classList.add('hidden');
+            imagePreview.src = '';
+        }
         if (imagePreviewContainer) imagePreviewContainer.classList.remove('has-image');
-        if (clearMainImageBtn) clearMainImageBtn.classList.add('hidden');
-        if (imageUploadInput) imageUploadInput.value = ''; // Reset input value
-        
+        if (clearImageBtn) clearImageBtn.classList.add('hidden'); // Hide clear button
         clearMask();
         clearLightMarkers();
         hideComparisonView();
@@ -817,7 +702,7 @@ if (appContainer) {
     const prompt = promptInput?.value.trim() || '';
     const negativePrompt = negativePromptInput?.value.trim() || '';
     const temperature = creativitySlider ? parseFloat(creativitySlider.value) : 0.9;
-    
+
     let finalPrompt = prompt;
     if (negativePrompt && currentMode !== 'lighting') {
         finalPrompt += `. Avoid the following: ${negativePrompt}`;
@@ -839,7 +724,6 @@ if (appContainer) {
       let isTextOutputMode = false; // Flag to check if the mode is for text output
 
       // --- Determine Model and API based on Mode and Input ---
-      
       if (currentMode === 'lighting') {
           currentModelName = 'gemini-2.5-flash-image';
           generationAPI = 'generateContent';
@@ -861,11 +745,10 @@ if (appContainer) {
                   },
               };
           } else if (lightMarkers.length > 0 && lightingOverlayCanvas) {
-              // ... lighting marker logic ...
               const { width, height } = lightingOverlayCanvas;
               const colorValue = lightColorPicker?.value || '#FFFFFF';
-              // ... (marker conversion logic remains same) ...
-               const angleToDirection = (angleRad: number): string => {
+
+              const angleToDirection = (angleRad: number): string => {
                   const angleDeg = ((angleRad * 180 / Math.PI) + 360 + 90) % 360; 
                   if (angleDeg >= 337.5 || angleDeg < 22.5) return 'top';
                   if (angleDeg >= 22.5 && angleDeg < 67.5) return 'top-right';
@@ -894,7 +777,7 @@ if (appContainer) {
                        return `a ${sizeDesc} circular (omni-directional) light source ${colorDesc}${location}`;
                   }
               };
-
+      
               const descriptions = lightMarkers.map(marker => convertCoordsToDescription(marker, width, height));
               const locations = descriptions.join(' and ');
               const placementPrompt = `Add specific light sources: ${locations}.`;
@@ -943,7 +826,7 @@ if (appContainer) {
           }
       } else if (currentMode === 'analyze') {
           isTextOutputMode = true;
-          currentModelName = 'gemini-3-pro-preview';
+          currentModelName = 'gemini-3-pro-preview'; // Use Pro model for better reasoning
           generationAPI = 'generateContent';
           
           const allPartsForAnalyze: (object)[] = [];
@@ -966,57 +849,59 @@ if (appContainer) {
               },
           };
       }
-      else if (currentMode === 'free') {
-          // Free mode (Generation). We explicitly ignore 'uploadedImage' (main image) here
-          // because in this mode the UI hides the main image input, implying the user
-          // wants to generate from scratch or from references only.
-          
+      else if (currentMode === 'free' && !uploadedImage) {
+          // Free mode, no main image uploaded
           if (referenceImages.length > 0) {
-              currentModelName = 'gemini-2.5-flash-image';
+              // Free mode, no main image, but references are present.
+              // Use gemini-2.5-flash-image-preview for text + multiple images.
+              currentModelName = 'gemini-2.5-flash-image'; // Changed to official model name
               generationAPI = 'generateContent';
               const allParts: (object)[] = [];
               const referenceImageParts = referenceImages.map(refImg => ({
                   inlineData: { data: refImg.data, mimeType: refImg.mimeType }
               }));
               allParts.push(...referenceImageParts);
-              allParts.push({ text: finalPrompt }); 
+              allParts.push({ text: finalPrompt }); // Prompt always last
               
               apiRequestPayload = {
                   model: currentModelName,
                   contents: { parts: allParts },
                   config: {
-                      responseModalities: [Modality.IMAGE], 
+                      responseModalities: [Modality.IMAGE], // Only image output expected
                       temperature: temperature,
                   },
               };
           } else {
-              // Imagen 3
+              // Free mode, no main image, no references. Pure text-to-image.
+              // Use imagen-4.0-generate-001.
               currentModelName = 'imagen-4.0-generate-001';
               generationAPI = 'generateImages';
               apiRequestPayload = {
                   model: currentModelName,
                   prompt: finalPrompt,
                   config: {
-                      numberOfImages: generationCount, // Imagen handles count internally
-                      outputMimeType: 'image/jpeg',
+                      numberOfImages: generationCount,
+                      outputMimeType: 'image/jpeg', // Imagen always outputs JPEG
                       aspectRatio: selectedAspectRatio,
                   },
               };
           }
       } else {
-          // Gemini Image Editing
-          currentModelName = 'gemini-2.5-flash-image';
+          // All other modes OR Free mode with a main image uploaded.
+          // Use gemini-2.5-flash-image (image editing/multi-modal generation).
+          currentModelName = 'gemini-2.5-flash-image'; // Changed to official model name
           generationAPI = 'generateContent';
           const allParts: (object)[] = [];
 
+          // 1. Add the main image if available
           if (uploadedImage) {
               allParts.push({
                   inlineData: { data: uploadedImage.data, mimeType: uploadedImage.mimeType },
               });
           }
           
+          // 2. Add mask if in inpaint mode and canvas is not blank
           if (currentMode === 'inpaint' && maskCanvas && imagePreview && !isCanvasBlank(maskCanvas) && uploadedImage) {
-             // ... Mask logic ...
               const originalWidth = imagePreview.naturalWidth;
               const originalHeight = imagePreview.naturalHeight;
           
@@ -1054,11 +939,14 @@ if (appContainer) {
                           allParts.push({ inlineData: { mimeType: 'image/png', data: maskBase64 } });
                       }
                   }
+              } else {
+                  console.warn("Could not determine original image dimensions. Mask will not be sent.");
               }
           }
           
-          if (currentMode !== 'inpaint' && referenceImages.length > 0 && uploadedImage) {
-              // ... Reference resize logic ...
+          // 3. Add reference images, pre-processing them to match the main image's aspect ratio.
+          // Only if NOT in 'inpaint' mode, as inpaint focuses on main image + mask
+          if (currentMode !== 'inpaint' && referenceImages.length > 0 && uploadedImage) { // References are only used with a main image in this scenario
               let processedReferenceImages: ImagePart[] = referenceImages;
               try {
                   const mainImageDimensions = await new Promise<{width: number, height: number}>((resolve, reject) => {
@@ -1084,16 +972,18 @@ if (appContainer) {
               }));
               allParts.push(...referenceImageParts);
               
+              // Add explicit instructions to the prompt for the model to preserve dimensions.
               finalPrompt = `This is an image editing task with references. You are given a primary image to edit, and one or more reference images. **Do not edit the reference images.** Your task is to apply the requested edit to the primary image only, using the reference images for guidance. The primary image is the first one in the sequence. Preserve its aspect ratio. The user's request is: "${finalPrompt}"`;
           }
 
+          // 4. Add the text prompt
           allParts.push({ text: finalPrompt });
           
           apiRequestPayload = {
               model: currentModelName,
               contents: { parts: allParts },
               config: {
-                  responseModalities: [Modality.IMAGE], 
+                  responseModalities: [Modality.IMAGE], // Only image output expected for editing modes
                   temperature: temperature,
               },
           };
@@ -1105,7 +995,7 @@ if (appContainer) {
       let attempts = 0;
       
       while(resultImages.length < activeGenCount && attempts < MAX_TOTAL_ATTEMPTS) {
-          if (isTextOutputMode) { 
+          if (isTextOutputMode) { // For text output, only one "generation" makes sense
               generationCount = 1;
           }
           const needed = activeGenCount - resultImages.length;
@@ -1115,21 +1005,20 @@ if (appContainer) {
           console.log(`Attempting to generate ${needed} more image(s) or get text response...`);
 
           if (generationAPI === 'generateContent') {
-              const generationPromises = Array(needed).fill(null).map(() => {
-                  return ai.models.generateContent(apiRequestPayload).then(response => ({ response }));
-              });
-              
+              const generationPromises = Array(needed).fill(null).map(() =>
+                  ai.models.generateContent(apiRequestPayload)
+              );
               attempts += needed;
               const results = await Promise.allSettled(generationPromises);
-              
               for (const result of results) {
                   if (result.status === 'fulfilled') {
-                      const { response } = result.value;
+                      const response = result.value;
                       if (isTextOutputMode) {
+                          // Display text directly for analyze mode
                           imageGallery.innerHTML = '';
                           const textResult = response.text;
-                          setGalleryMessage(textResult, false, true);
-                          break;
+                          setGalleryMessage(textResult, false, true); // Display as raw text
+                          break; // For text output, we only need one response
                       } else {
                           if (response.candidates && response.candidates.length > 0) {
                               const imagePartFound = response.candidates[0].content.parts.find(part => part.inlineData);
@@ -1145,18 +1034,12 @@ if (appContainer) {
                       }
                   } else { console.error('A generation request failed:', result.reason); }
               }
-              if (isTextOutputMode) break;
-
+              if (isTextOutputMode) break; // Exit loop after processing text
           } else if (generationAPI === 'generateImages') {
-              const imgRequestPayload = { 
-                  ...apiRequestPayload, 
-                  config: { 
-                      ...apiRequestPayload.config, 
-                      numberOfImages: needed,
-                  } 
-              };
-              
-              attempts += needed; 
+              // For generateImages, it generates 'numberOfImages' in one call.
+              // We will make one call for the 'needed' images.
+              const imgRequestPayload = { ...apiRequestPayload, config: { ...apiRequestPayload.config, numberOfImages: needed } };
+              attempts += needed; // Count this as 'needed' attempts, even if one call
 
               try {
                   const response = await ai.models.generateImages(imgRequestPayload);
@@ -1165,7 +1048,7 @@ if (appContainer) {
                           if (genImage.image?.imageBytes) {
                               if (resultImages.length < activeGenCount) {
                                   resultImages.push({
-                                      mimeType: 'image/jpeg',
+                                      mimeType: 'image/jpeg', // Imagen always outputs JPEG
                                       data: genImage.image.imageBytes,
                                   });
                               }
@@ -1258,4 +1141,748 @@ if (appContainer) {
       updateButtonState();
     }
   };
+  
+  const handleDragOver = (e: DragEvent) => {
+    e.preventDefault();
+    imagePreviewContainer?.classList.add('drag-over');
+  };
+
+  const handleDragLeave = (e: DragEvent) => {
+    e.preventDefault();
+    imagePreviewContainer?.classList.remove('drag-over');
+  };
+
+  const handleDrop = async (e: DragEvent) => {
+    e.preventDefault();
+    imagePreviewContainer?.classList.remove('drag-over');
+    
+    // Check for a dropped history item first (as JSON for robustness)
+    const historyItemJson = e.dataTransfer?.getData('application/json');
+    if (historyItemJson) {
+        try {
+            const imagePart: ImagePart = JSON.parse(historyItemJson);
+            // Basic validation
+            if (imagePart && typeof imagePart.mimeType === 'string' && typeof imagePart.data === 'string') {
+                const file = new File([Uint8Array.from(atob(imagePart.data), c => c.charCodeAt(0))], 'dropped_history_image.png', { type: imagePart.mimeType });
+                processMainImageFile(file);
+            }
+        } catch (err) {
+            console.error("Failed to parse dropped history item:", err);
+        }
+        return; // Stop further processing
+    }
+
+    // Fallback to file drop for main image
+    const files = e.dataTransfer?.files;
+    if (files && files.length > 0) {
+        processMainImageFile(files[0]); // Only take the first file for the main image
+    }
+  };
+
+  const handleReferenceDragOver = (e: DragEvent) => {
+    e.preventDefault();
+    if (referenceUploadArea) {
+      referenceUploadArea.classList.add('drag-over');
+    }
+  };
+
+  const handleReferenceDragLeave = (e: DragEvent) => {
+    e.preventDefault();
+    if (referenceUploadArea) {
+      referenceUploadArea.classList.remove('drag-over');
+    }
+  };
+
+  const handleReferenceDrop = async (e: DragEvent) => {
+    e.preventDefault();
+    if (referenceUploadArea) {
+      referenceUploadArea.classList.remove('drag-over');
+    }
+    
+    const files = e.dataTransfer?.files;
+    if (files && files.length > 0) {
+        await processReferenceFiles(files);
+    }
+  };
+
+  const handlePaste = (event: ClipboardEvent) => {
+    const items = event.clipboardData?.items;
+    if (!items) return;
+
+    let pastedImageFile: File | null = null;
+    for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+            const file = items[i].getAsFile();
+            if (file) {
+                pastedImageFile = file;
+                break; // Take only the first image from paste for the main image
+            }
+        }
+    }
+    if (pastedImageFile) {
+        processMainImageFile(pastedImageFile);
+        event.preventDefault(); 
+    }
+  };
+
+  // --- Inpainting canvas functions ---
+
+  const updateBrushCursorSize = () => {
+    if (brushCursor && brushSizeSlider) {
+        const size = parseInt(brushSizeSlider.value, 10);
+        brushCursor.style.width = `${size}px`;
+        brushCursor.style.height = `${size}px`;
+    }
+  };
+
+  const saveMaskState = () => {
+    // Fix: Prevent error on 0-sized canvas
+    if (maskCtx && maskCanvas && maskCanvas.width > 0 && maskCanvas.height > 0) {
+        maskHistory.push(maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height));
+    }
+  };
+
+  const undoLastMaskAction = () => {
+    if (maskHistory.length > 1 && maskCtx) {
+        maskHistory.pop(); // Remove current state
+        maskCtx.putImageData(maskHistory[maskHistory.length - 1], 0, 0); // Restore previous
+    } else if (maskHistory.length === 1) {
+        // If only one state is left, it's the initial blank one, so just clear
+        clearMask();
+    }
+  };
+
+  const clearMask = () => {
+    if (maskCtx && maskCanvas) {
+        maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+        maskHistory = [];
+        saveMaskState(); // Save the initial blank state
+    }
+  }
+
+  const getCoords = (e: MouseEvent | TouchEvent, canvas: HTMLCanvasElement): {x: number, y: number} | null => {
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    const event = 'touches' in e ? e.touches[0] : e;
+    return {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top
+    };
+  }
+  
+  const startDrawing = (e: MouseEvent | TouchEvent) => {
+    e.preventDefault();
+    const coords = getCoords(e, maskCanvas!);
+    if (!maskCtx || !coords) return;
+    
+    saveMaskState(); // Save state before drawing starts
+
+    isDrawing = true;
+    [lastX, lastY] = [coords.x, coords.y];
+
+    // Draw a single dot for clicks without dragging
+    maskCtx.beginPath();
+    maskCtx.arc(coords.x, coords.y, maskCtx.lineWidth / 2, 0, Math.PI * 2);
+    maskCtx.fill();
+  };
+
+  const draw = (e: MouseEvent | TouchEvent) => {
+    if (!isDrawing) return;
+    e.preventDefault();
+    const coords = getCoords(e, maskCanvas!);
+    if (!maskCtx || !coords) return;
+
+    maskCtx.beginPath();
+    maskCtx.moveTo(lastX, lastY);
+    maskCtx.lineTo(coords.x, coords.y);
+    maskCtx.stroke();
+    [lastX, lastY] = [coords.x, coords.y];
+  };
+
+  const stopDrawing = () => {
+    if (isDrawing) {
+        isDrawing = false;
+        maskCtx?.beginPath(); // Reset the path
+    }
+  };
+
+  // --- Lighting Canvas Functions ---
+  const drawLightMarkers = () => {
+    if (!lightingOverlayCtx || !lightingOverlayCanvas) return;
+    const ctx = lightingOverlayCtx;
+    ctx.clearRect(0, 0, lightingOverlayCanvas.width, lightingOverlayCanvas.height);
+    
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.lineWidth = 2;
+
+    lightMarkers.forEach(marker => {
+        ctx.fillStyle = 'rgba(74, 144, 226, 0.8)';
+        
+        if (marker.shape === 'cone') {
+            ctx.save();
+            ctx.translate(marker.x, marker.y);
+            ctx.rotate(marker.rotation);
+            
+            ctx.beginPath();
+            // Draw a cone shape pointing up from (0,0) relative to the marker's center
+            const tipY = -marker.size * 0.75;
+            const baseY = marker.size * 0.75;
+            const baseHalfWidth = marker.size;
+            
+            ctx.moveTo(0, tipY); // Tip
+            ctx.lineTo(-baseHalfWidth, baseY); // Bottom left
+            ctx.lineTo(baseHalfWidth, baseY); // Bottom right
+            ctx.closePath();
+            
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.restore();
+        } else { // Circle
+            ctx.beginPath();
+            ctx.arc(marker.x, marker.y, marker.size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+        }
+    });
+  }
+
+  const clearLightMarkers = () => {
+    lightMarkers = [];
+    drawLightMarkers();
+    if (clearLightSourcesBtn) clearLightSourcesBtn.classList.add('hidden');
+  }
+
+  const setupCanvases = () => {
+    if (!maskCanvas || !imagePreview || !brushSizeSlider || !brushCursor || !lightingOverlayCanvas || !lightSizeSlider || !lightShapeSelector || !imageViewport) return;
+    maskCtx = maskCanvas.getContext('2d');
+    lightingOverlayCtx = lightingOverlayCanvas.getContext('2d');
+    if (!maskCtx || !lightingOverlayCtx) return;
+
+    maskCtx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+    maskCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    maskCtx.lineWidth = parseInt(brushSizeSlider.value, 10);
+    maskCtx.lineCap = 'round';
+    maskCtx.lineJoin = 'round';
+    
+    // Sync canvas size with image size
+    const resizeObserver = new ResizeObserver(entries => {
+        for (const entry of entries) {
+            const { width, height } = entry.contentRect;
+            maskCanvas.width = width;
+            maskCanvas.height = height;
+            lightingOverlayCanvas.width = width;
+            lightingOverlayCanvas.height = height;
+
+            if (comparisonAfterImage) {
+                // Ensure the "after" image container scales with the "before" image
+                comparisonAfterImage.style.width = `${width}px`;
+                comparisonAfterImage.style.height = `${height}px`;
+            }
+
+            // Re-apply settings as they can be reset on resize
+            if(maskCtx) {
+                maskCtx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+                maskCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                maskCtx.lineWidth = parseInt(brushSizeSlider.value, 10);
+                maskCtx.lineCap = 'round';
+                maskCtx.lineJoin = 'round';
+            }
+            clearMask(); // Clear mask on resize
+            clearLightMarkers(); // Clear markers on resize
+        }
+    });
+    resizeObserver.observe(imagePreview);
+
+    // Custom cursor logic
+    updateBrushCursorSize();
+    maskCanvas.addEventListener('mouseenter', () => brushCursor.classList.remove('hidden'));
+    maskCanvas.addEventListener('mouseleave', () => brushCursor.classList.add('hidden'));
+    maskCanvas.addEventListener('mousemove', (e) => {
+        brushCursor.style.left = `${e.clientX}px`;
+        brushCursor.style.top = `${e.clientY}px`;
+        draw(e);
+    });
+
+    // Drawing Listeners
+    maskCanvas.addEventListener('mousedown', startDrawing);
+    maskCanvas.addEventListener('mouseup', stopDrawing);
+    maskCanvas.addEventListener('mouseout', stopDrawing);
+    maskCanvas.addEventListener('touchstart', startDrawing, { passive: false });
+    maskCanvas.addEventListener('touchmove', draw, { passive: false });
+    maskCanvas.addEventListener('touchend', stopDrawing);
+
+    saveMaskState(); // Save initial blank state
+
+    // Light Marker Listeners
+    lightingOverlayCanvas.addEventListener('mousedown', (e) => {
+        if (!isPlacingLight) return;
+        const coords = getCoords(e, lightingOverlayCanvas);
+        if (!coords) return;
+
+        // Check if clicking an existing cone marker to start rotation
+        const clickedMarker = lightMarkers.find(marker => {
+             const dx = marker.x - coords.x;
+             const dy = marker.y - coords.y;
+             return marker.shape === 'cone' && (dx * dx + dy * dy) < marker.size * marker.size;
+        });
+
+        if (clickedMarker) {
+            draggedMarker = clickedMarker;
+            imageViewport.classList.add('grabbing');
+        } else {
+            // Add new marker
+            const size = parseInt(lightSizeSlider.value, 10);
+            const shape = lightShapeSelector.querySelector<HTMLInputElement>('input[name="light-shape"]:checked')?.value as 'circle' | 'cone';
+            lightMarkers.push({ ...coords, size, shape, rotation: 0 });
+            drawLightMarkers();
+            if (clearLightSourcesBtn) clearLightSourcesBtn.classList.remove('hidden');
+        }
+    });
+
+    lightingOverlayCanvas.addEventListener('mousemove', (e) => {
+        if (draggedMarker) {
+            const coords = getCoords(e, lightingOverlayCanvas);
+            if (coords) {
+                const dx = coords.x - draggedMarker.x;
+                const dy = coords.y - draggedMarker.y;
+                draggedMarker.rotation = Math.atan2(dy, dx) - Math.PI / 2; // Point up at 0 rad
+                drawLightMarkers();
+            }
+        }
+    });
+
+    const stopDraggingMarker = () => {
+        draggedMarker = null;
+        imageViewport.classList.remove('grabbing');
+    }
+
+    lightingOverlayCanvas.addEventListener('mouseup', stopDraggingMarker);
+    lightingOverlayCanvas.addEventListener('mouseleave', stopDraggingMarker);
+  };
+
+
+  // Initial state and event listeners
+  if (imageUploadInput && promptInput && generateBtn && imagePreviewContainer && modeTabs && presetButtonsContainer && resultContainer && referenceUploadInput && referenceUploadArea && aspectRatioSelector && inpaintControls && brushSizeSlider && brushModeBtn && eraserModeBtn && undoMaskBtn && clearMaskBtn && removeMaskBtn && mainImageUploadContainer && promptInputContainer && fqaContentContainer && negativePromptContainer && creativitySliderContainer && generationCountSelector && lightingControlsContainer && temperatureSlider && temperatureValue && lightColorPicker && lightingOverlayCanvas && imageViewport && imageOverlayControls && toggleComparisonBtn && toggleLightPlacementBtn && lightProperties && lightSizeSlider && lightShapeSelector && clearLightSourcesBtn && comparisonAfterContainer && comparisonAfterImage && comparisonSliderHandle) {
+    
+    if (promptInput) {
+        defaultPromptPlaceholder = promptInput.placeholder; // Capture default
+    }
+
+    imageUploadInput.addEventListener('change', handleImageUploadEvent);
+    referenceUploadInput.addEventListener('change', handleReferenceUploadEvent);
+    promptInput.addEventListener('input', updateButtonState);
+    generateBtn.addEventListener('click', handleGenerateClick);
+    
+    // Lighting slider listener
+    temperatureSlider.addEventListener('input', () => {
+        const value = parseInt(temperatureSlider.value, 10);
+        temperatureValue.textContent = String(value);
+    });
+
+    // Lighting placement listeners (Overlay)
+    toggleLightPlacementBtn.addEventListener('click', () => {
+        isPlacingLight = !isPlacingLight;
+        toggleLightPlacementBtn.classList.toggle('active', isPlacingLight);
+        lightProperties.classList.toggle('hidden', !isPlacingLight);
+        imagePreviewContainer.classList.toggle('light-placement-active', isPlacingLight);
+        if (!isPlacingLight) {
+             draggedMarker = null;
+             imageViewport.classList.remove('grabbing');
+        } else {
+            clearLightSourcesBtn.classList.toggle('hidden', lightMarkers.length === 0);
+        }
+    });
+    
+    clearLightSourcesBtn.addEventListener('click', clearLightMarkers);
+    
+    // Lighting preset buttons
+    lightingPresetButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            if (!uploadedImage || !promptInput) return;
+            const prompt = button.dataset.prompt;
+            if (prompt) {
+                promptInput.value = prompt;
+                handleGenerateClick(); // Immediately generate on preset click
+            }
+        });
+    });
+
+    // Before/After Slider Logic
+    toggleComparisonBtn.addEventListener('click', () => {
+        if (toggleComparisonBtn.disabled) return;
+        isComparisonActive = !isComparisonActive;
+        toggleComparisonBtn.classList.toggle('active', isComparisonActive);
+        comparisonAfterContainer.classList.toggle('hidden', !isComparisonActive);
+        comparisonSliderHandle.classList.toggle('hidden', !isComparisonActive);
+    });
+
+    const moveSlider = (clientX: number) => {
+        const rect = imageViewport.getBoundingClientRect();
+        let x = clientX - rect.left;
+        x = Math.max(0, Math.min(rect.width, x)); // Clamp within bounds
+        const percent = (x / rect.width) * 100;
+        comparisonSliderHandle.style.left = `${percent}%`;
+        comparisonAfterContainer.style.width = `${percent}%`;
+    };
+
+    comparisonSliderHandle.addEventListener('mousedown', (e) => {
+        e.stopPropagation(); // Prevent bubbling to the container
+        isDraggingSlider = true;
+        imageViewport.classList.add('grabbing');
+    });
+
+    comparisonSliderHandle.addEventListener('click', (e) => {
+        e.stopPropagation();
+    });
+
+    window.addEventListener('mouseup', () => {
+        isDraggingSlider = false;
+        imageViewport.classList.remove('grabbing');
+    });
+    
+    window.addEventListener('mousemove', (e) => {
+        if (isDraggingSlider) {
+            moveSlider(e.clientX);
+        }
+    });
+
+    // Creativity slider listener
+    if (creativitySlider && creativityValue) {
+        creativitySlider.addEventListener('input', () => {
+            creativityValue.textContent = creativitySlider.value;
+        });
+    }
+
+    // Number of images selection
+    numButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            generationCount = parseInt(button.dataset.count || '1', 10);
+            numButtons.forEach(btn => {
+                btn.classList.remove('active');
+                btn.setAttribute('aria-pressed', 'false');
+            });
+            button.classList.add('active');
+            button.setAttribute('aria-pressed', 'true');
+        });
+    });
+
+    // Aspect Ratio selection
+    aspectRatioButtons.forEach(button => {
+      button.addEventListener('click', () => {
+        selectedAspectRatio = button.dataset.ratio || '1:1';
+        aspectRatioButtons.forEach(btn => {
+          btn.classList.remove('active');
+          btn.setAttribute('aria-pressed', 'false');
+        });
+        button.classList.add('active');
+        button.setAttribute('aria-pressed', 'true');
+      });
+    });
+
+    // Clear image button listener
+    if (clearImageBtn) {
+        clearImageBtn.addEventListener('click', (e) => {
+            e.stopPropagation(); // Prevent triggering the upload input
+            processMainImageFile(null); // Reuse the logic for clearing
+            imageUploadInput.value = ''; // Reset input
+        });
+    }
+
+    // Allow clicking container to trigger file input
+    imagePreviewContainer.addEventListener('click', (e) => {
+        // Only trigger upload if not in a mode that uses canvas interaction and not clicking the clear button
+        if (currentMode !== 'inpaint' && !isPlacingLight && e.target !== maskCanvas && e.target !== lightingOverlayCanvas && e.target !== clearImageBtn) {
+            imageUploadInput.click();
+        }
+    });
+    imagePreviewContainer.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+             if (currentMode !== 'inpaint' && !isPlacingLight) {
+                imageUploadInput.click();
+            }
+        }
+    });
+
+    // Drag and Drop listeners for main image 
+    imagePreviewContainer.addEventListener('dragover', handleDragOver);
+    imagePreviewContainer.addEventListener('dragleave', handleDragLeave);
+    imagePreviewContainer.addEventListener('drop', handleDrop);
+    
+    // Drag and Drop listeners for reference images
+    referenceUploadArea.addEventListener('dragover', handleReferenceDragOver);
+    referenceUploadArea.addEventListener('dragleave', handleReferenceDragLeave);
+    referenceUploadArea.addEventListener('drop', handleReferenceDrop);
+
+    // Paste listener
+    window.addEventListener('paste', handlePaste);
+
+    // Mode Tabs logic
+    modeTabs.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement;
+      if (target.matches('.tab-btn')) {
+        const mode = target.dataset.mode || 'character';
+        currentMode = mode;
+        
+        modeTabs.querySelectorAll('.tab-btn').forEach(btn => {
+          btn.classList.remove('active');
+          btn.setAttribute('aria-selected', 'false');
+        });
+        target.classList.add('active');
+        target.setAttribute('aria-selected', 'true');
+
+        const isCharacter = mode === 'character';
+        const isInpaint = mode === 'inpaint';
+        const isMatch3 = mode === 'match3';
+        const isFree = mode === 'free';
+        const isFQA = mode === 'fqa';
+        const isAnalyzeMode = mode === 'analyze';
+        const isLighting = mode === 'lighting';
+
+        // --- Core UI Visibility for FQA vs. other modes ---
+        if (isFQA) {
+          mainImageUploadContainer.classList.add('hidden');
+          promptInputContainer.classList.add('hidden');
+          resultContainer.classList.add('hidden');
+          fqaContentContainer.classList.remove('hidden');
+
+          uploadedImage = null;
+          referenceImages = [];
+          processMainImageFile(null);
+          renderReferenceImages();
+          if (promptInput) promptInput.value = '';
+          
+          if (brushCursor) { brushCursor.classList.add('hidden'); }
+          referenceUploadArea.classList.add('hidden');
+          referencePreviewContainer.classList.add('hidden');
+          inpaintControls?.classList.add('hidden');
+          presetButtonsContainer.classList.add('hidden');
+          match3PresetButtonsContainer?.classList.add('hidden');
+          negativePromptContainer?.classList.add('hidden');
+          creativitySliderContainer?.classList.add('hidden');
+          generationCountSelector?.classList.add('hidden');
+          aspectRatioSelector?.classList.add('hidden');
+          lightingControlsContainer?.classList.add('hidden');
+          imageOverlayControls?.classList.add('hidden');
+
+        } else { // All other (non-FQA) modes
+            mainImageUploadContainer.classList.remove('hidden');
+            promptInputContainer.classList.remove('hidden');
+            resultContainer.classList.remove('hidden');
+            fqaContentContainer.classList.add('hidden');
+            
+            // Default visibility states
+            let showPresets = isCharacter;
+            let showMatch3Presets = isMatch3;
+            let showInpaintControls = isInpaint;
+            let showAspectRatio = isFree;
+            let showReferenceUpload = true;
+            let showNegativePrompt = true;
+            let showCreativity = true;
+            let showGenCount = true;
+            let showLightingControls = isLighting;
+            let showPromptInput = true;
+            let showOverlayControls = isLighting;
+
+
+            if (isAnalyzeMode) {
+                showPresets = false;
+                showMatch3Presets = false;
+                showNegativePrompt = false;
+                showCreativity = false;
+                showGenCount = false;
+                showAspectRatio = false;
+                showInpaintControls = false;
+                showLightingControls = false;
+                showOverlayControls = false;
+            } else if (isLighting) {
+                showPresets = false;
+                showMatch3Presets = false;
+                showNegativePrompt = false;
+                showCreativity = false;
+                showGenCount = true; 
+                showAspectRatio = false;
+                showInpaintControls = false;
+                showReferenceUpload = true;
+                showPromptInput = true; 
+                toggleComparisonBtn.disabled = !comparisonAfterImage.src;
+            }
+
+            // Apply visibility states
+            presetButtonsContainer.classList.toggle('hidden', !showPresets);
+            match3PresetButtonsContainer?.classList.toggle('hidden', !showMatch3Presets);
+            inpaintControls?.classList.toggle('hidden', !showInpaintControls);
+            aspectRatioSelector?.classList.toggle('hidden', !showAspectRatio);
+            referenceUploadArea.classList.toggle('hidden', !showReferenceUpload);
+            negativePromptContainer?.classList.toggle('hidden', !showNegativePrompt);
+            creativitySliderContainer?.classList.toggle('hidden', !showCreativity);
+            generationCountSelector?.classList.toggle('hidden', !showGenCount);
+            lightingControlsContainer?.classList.toggle('hidden', !showLightingControls);
+            promptInputWrapper?.classList.toggle('hidden', !showPromptInput);
+            imageOverlayControls.classList.toggle('hidden', !showOverlayControls);
+
+            
+            // Special handling for main image preview
+            const hideImagePreviewForFreeMode = isFree;
+            imagePreviewContainer.classList.toggle('hidden', hideImagePreviewForFreeMode);
+            imagePreviewContainer.classList.toggle('inpaint-active', isInpaint);
+            
+            // Always reset lighting state on mode change
+            imagePreviewContainer.classList.remove('light-placement-active');
+            isPlacingLight = false;
+            if (toggleLightPlacementBtn && lightProperties) {
+                toggleLightPlacementBtn.classList.remove('active');
+                lightProperties.classList.add('hidden');
+            }
+            hideComparisonView();
+
+            if (!isInpaint && brushCursor) {
+                brushCursor.classList.add('hidden');
+            }
+            
+            // If switching to a mode that doesn't use reference images, clear them
+            if (!showReferenceUpload) {
+                referenceImages = [];
+                renderReferenceImages();
+            }
+
+            // Analyze image if switching to lighting mode with an image already loaded
+            if (isLighting && uploadedImage) {
+                analyzeAndSetTemperature(uploadedImage);
+            }
+        }
+
+        updateReferenceUploadLabel();
+        updateMainUploadLabel();
+        updatePromptPlaceholder();
+        updateButtonState();
+      }
+    });
+
+    // Inpaint Controls Listeners
+    if (brushSizeSlider && brushModeBtn && eraserModeBtn && undoMaskBtn && clearMaskBtn && removeMaskBtn) {
+        brushSizeSlider.addEventListener('input', () => {
+            if (maskCtx) maskCtx.lineWidth = parseInt(brushSizeSlider.value, 10);
+            updateBrushCursorSize();
+        });
+
+        brushModeBtn.addEventListener('click', () => {
+            if (!maskCtx) return;
+            isErasing = false;
+            maskCtx.globalCompositeOperation = 'source-over';
+            brushModeBtn.classList.add('active');
+            eraserModeBtn.classList.remove('active');
+        });
+
+        eraserModeBtn.addEventListener('click', () => {
+            if (!maskCtx) return;
+            isErasing = true;
+            maskCtx.globalCompositeOperation = 'destination-out';
+            eraserModeBtn.classList.add('active');
+            brushModeBtn.classList.remove('active');
+        });
+
+        undoMaskBtn.addEventListener('click', undoLastMaskAction);
+        clearMaskBtn.addEventListener('click', clearMask);
+        removeMaskBtn.addEventListener('click', () => {
+            if (!promptInput) return;
+            promptInput.value = 'remove the masked object';
+            updateButtonState();
+            handleGenerateClick();
+        });
+    }
+
+    // A helper function to set up preset buttons to avoid repetition
+    const setupPresetButton = (id: string, text: string) => {
+      const button = appContainer.querySelector<HTMLButtonElement>(`#${id}`);
+      if (button) {
+        button.addEventListener('click', () => {
+          if (!uploadedImage || !promptInput) return;
+          promptInput.value = text;
+          updateButtonState();
+          handleGenerateClick();
+        });
+      }
+    };
+    
+    // Preset button listeners
+    setupPresetButton('preset-turn-side', 'Измени вид сбоку');
+    setupPresetButton('preset-turn-34', 'Измени вид в 3/4');
+    setupPresetButton('preset-turn-back', 'Измени вид со спины');
+    setupPresetButton('preset-turn-front', 'Измени вид анфас');
+    setupPresetButton('preset-emotion-ref', 'Изменить эмоцию персонажа');
+    setupPresetButton('preset-emotion-sad', 'Измени эмоцию персонажа - грусть');
+    setupPresetButton('preset-emotion-surprise', 'Измени эмоцию персонажа - удивление');
+    setupPresetButton('preset-emotion-joy', 'Измени эмоцию персонажа - радость');
+    setupPresetButton('preset-pose-sit', 'Измени позу персонажа - сидит');
+    setupPresetButton('preset-pose-dance', 'Измени позу персонажа - танцует');
+    setupPresetButton('preset-pose-gesture', 'Измени позу персонажа - жестикулирует руками');
+    setupPresetButton('preset-shine-10', 'Добавь пластикового блеска на 10%. Представь шкалу пластика как 100% и добавь 10% блеска');
+    setupPresetButton('preset-shine-15', 'Добавь пластикового блеска на 15%. Представь шкалу пластика как 100% и добавь 15% блеска');
+    setupPresetButton('preset-shine-20', 'Добавь пластикового блеска на 20%. Представь шкалу пластика как 100% и добавь 20% блеска');
+    setupPresetButton('preset-shine-25', 'Добавь пластикового блеска на 25%. Представь шкалу пластика как 100% и добавь 25% блеска');
+    setupPresetButton('preset-shine-30', 'Добавь пластикового блеска на 30%. Представь шкалу пластика как 100% и добавь 30% блеска');
+    setupPresetButton('preset-remove-bg', 'Удалить фон. Верни изображение в формате PNG с прозрачным фоном.');
+    setupPresetButton('preset-metal-30', 'Добавь эффекта метала на 30%. Представь шкалу метала как 100% и добавь 30% эффекта');
+    setupPresetButton('preset-metal-40', 'Добавь эффекта метала на 40%. Представь шкалу метала как 100% и добавь 40% эффекта');
+    setupPresetButton('preset-metal-50', 'Добавь эффекта метала на 50%. Представь шкалу метала как 100% и добавь 50% эффекта');
+    setupPresetButton('preset-metal-70', 'Добавь эффекта метала на 70%. Представь шкалу метала как 100% и добавь 70% эффекта');
+    setupPresetButton('preset-shadows', 'усиль немного тени с фронтальным освещением');
+    setupPresetButton('preset-pose-ref', 'Измени позу персонажа согласно прикрепленному референсу');
+    setupPresetButton('preset-turn-360', 'покажи как персонаж в этой позе будет выглядеть во всех следующих положениях: сбоку поворот влево, в 3/4, сзади, сбоку поворот вправо. Добавь произвольно еще 2 ракурса. сгенерируй это отдельными изображениями');
+    setupPresetButton('preset-head-turns', 'покажи поворот головы во всех слудующих положениях: сбоку поворот влево, в 3/4, сзади, сбоку поворот вправо. Добавь произвольно еще 2 ракурса, 3/4 смотрит вверх, 3/4 смотрит вниз, смотрит вверх, смотрит вниз. сгенерируй это отдельными изображениями');
+    
+    // Single Image Modal listeners
+    if (fullscreenModal && closeModalBtn && prevImageBtn && nextImageBtn) {
+        closeModalBtn.addEventListener('click', closeModal);
+        prevImageBtn.addEventListener('click', showPrevImage);
+        nextImageBtn.addEventListener('click', showNextImage);
+
+        fullscreenModal.addEventListener('click', (e) => {
+            if (e.target === fullscreenModal) {
+                closeModal();
+            }
+        });
+    }
+
+    // Gallery Modal Listeners
+    if (galleryModal && closeGalleryBtn && galleryBtn && downloadSelectedBtn) {
+      galleryBtn.addEventListener('click', openGalleryModal);
+      closeGalleryBtn.addEventListener('click', closeGalleryModal);
+      downloadSelectedBtn.addEventListener('click', handleDownloadSelected);
+      galleryModal.addEventListener('click', (e) => {
+          // Close if clicking on the backdrop, not the content
+          if (e.target === galleryModal) {
+              closeGalleryModal();
+          }
+      });
+    }
+
+    // Global keydown listener for all modals
+    window.addEventListener('keydown', (e) => {
+        // If single image view is open, its controls take priority
+        if (fullscreenModal && !fullscreenModal.classList.contains('modal-hidden')) {
+             if (e.key === 'Escape') closeModal();
+             if (e.key === 'ArrowLeft') showPrevImage();
+             if (e.key === 'ArrowRight') showNextImage();
+             return; // Stop further processing
+        }
+        
+        // Else, if gallery is open, handle its close event
+        if (galleryModal && !galleryModal.classList.contains('modal-hidden')) {
+            if (e.key === 'Escape') closeGalleryModal();
+        }
+    });
+
+    setupCanvases();
+    setGalleryMessage('Your generated image will appear here.');
+    renderHistory();
+    
+    // Simulate a click on the default tab ('character') to initialize state correctly
+    // This ensures all initial visibilities are set as if the user clicked the 'character' tab.
+    const defaultTabButton = appContainer.querySelector<HTMLButtonElement>('#tab-character');
+    if (defaultTabButton) {
+        defaultTabButton.click();
+    }
+  }
 }
