@@ -1,6 +1,8 @@
 
 
 
+
+
 body {
   font-family: 'Segoe UI', 'Roboto', sans-serif;
   margin: 0;
@@ -1294,6 +1296,47 @@ button#generate-btn:disabled {
 .nav-btn.next {
     right: 1rem;
 }
+
+/* Action button styles (Copy) */
+.action-btn {
+    position: absolute;
+    background-color: rgba(30, 30, 30, 0.6);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    width: 44px;
+    height: 44px;
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    transition: background-color 0.2s, transform 0.2s;
+    bottom: 2rem; /* Position at bottom */
+    z-index: 1002;
+}
+
+.action-btn:hover {
+    background-color: rgba(50, 50, 50, 0.9);
+    transform: scale(1.05);
+}
+
+.action-btn.copy {
+    right: 2rem; /* Bottom right corner */
+}
+
+/* Add success feedback animation */
+@keyframes pulse-green {
+    0% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7); }
+    70% { box-shadow: 0 0 0 10px rgba(76, 175, 80, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0); }
+}
+
+.action-btn.success {
+    background-color: #4CAF50;
+    border-color: #4CAF50;
+    animation: pulse-green 0.5s;
+}
+
 
 #brush-cursor {
     position: fixed;

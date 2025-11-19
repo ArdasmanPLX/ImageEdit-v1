@@ -69,6 +69,8 @@ if (appContainer) {
   const comparisonAfterContainer = appContainer.querySelector<HTMLDivElement>('#comparison-after-container');
   const comparisonAfterImage = appContainer.querySelector<HTMLImageElement>('#comparison-after-image');
   const comparisonSliderHandle = appContainer.querySelector<HTMLDivElement>('#comparison-slider-handle');
+  const lightPlacementTool = appContainer.querySelector<HTMLDivElement>('#light-placement-tool');
+  const overlayDivider = appContainer.querySelector<HTMLDivElement>('.divider');
 
 
   // Inpainting elements
@@ -88,6 +90,7 @@ if (appContainer) {
   const closeModalBtn = document.querySelector<HTMLButtonElement>('#close-modal-btn');
   const prevImageBtn = document.querySelector<HTMLButtonElement>('#prev-image-btn');
   const nextImageBtn = document.querySelector<HTMLButtonElement>('#next-image-btn');
+  const copyModalBtn = document.querySelector<HTMLButtonElement>('#copy-modal-btn'); // NEW: Copy button
   
   // Gallery Modal elements
   const galleryModal = document.querySelector<HTMLDivElement>('#gallery-modal');
@@ -106,6 +109,7 @@ if (appContainer) {
   let currentMode = 'character';
   let selectedAspectRatio = '1:1'; // Default aspect ratio
   let defaultPromptPlaceholder: string | null = null; // Store original placeholder
+  let modePrompts: Record<string, string> = {}; // Store prompts for each mode
 
   // Inpainting state
   let maskCtx: CanvasRenderingContext2D | null = null;
@@ -132,278 +136,176 @@ if (appContainer) {
   
   const MAX_HISTORY_SIZE = 20; // Limit history to prevent UI clutter
 
+  // --- HELPER FUNCTIONS ---
+
+  const getCoords = (e: MouseEvent | TouchEvent, canvas: HTMLCanvasElement): {x: number, y: number} | null => {
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    const event = 'touches' in e ? e.touches[0] : e;
+    return {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top
+    };
+  }
+
+  const isCanvasBlank = (canvas: HTMLCanvasElement): boolean => {
+    if (canvas.width === 0 || canvas.height === 0) return true; 
+    return !canvas.getContext('2d')?.getImageData(0, 0, canvas.width, canvas.height).data.some(channel => channel !== 0);
+  }
+
+  const fileToImagePart = (file: File): Promise<ImagePart> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const dataUrl = e.target?.result as string;
+            const mimeType = dataUrl.substring(dataUrl.indexOf(':') + 1, dataUrl.indexOf(';'));
+            const data = dataUrl.substring(dataUrl.indexOf(',') + 1);
+            resolve({ mimeType, data });
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+  }
+
+  const copyImageToClipboard = async (imagePart: ImagePart) => {
+    try {
+        // 1. Create an Image element to load the data
+        const img = new Image();
+        img.src = `data:${imagePart.mimeType};base64,${imagePart.data}`;
+        
+        await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = reject;
+        });
+
+        // 2. Draw to canvas to ensure we get a clean PNG Blob
+        // ClipboardItem requires specific formats, usually 'image/png'
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error("Could not get canvas context");
+        
+        ctx.drawImage(img, 0, 0);
+        
+        const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
+        
+        if (!blob) throw new Error("Failed to create blob");
+
+        // 3. Write to clipboard
+        await navigator.clipboard.write([
+            new ClipboardItem({
+                'image/png': blob
+            })
+        ]);
+        
+        return true;
+    } catch (err) {
+        console.error("Failed to copy image: ", err);
+        alert("Failed to copy image to clipboard. " + err);
+        return false;
+    }
+  };
+
+  // --- CANVAS HELPER FUNCTIONS (Moved up to fix hoisting) ---
+
+  const updateBrushCursorSize = () => {
+    if (brushCursor && brushSizeSlider) {
+        const size = parseInt(brushSizeSlider.value, 10);
+        brushCursor.style.width = `${size}px`;
+        brushCursor.style.height = `${size}px`;
+    }
+  };
+
+  const saveMaskState = () => {
+    if (maskCtx && maskCanvas && maskCanvas.width > 0 && maskCanvas.height > 0) {
+        maskHistory.push(maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height));
+    }
+  };
+
+  const undoLastMaskAction = () => {
+    if (maskHistory.length > 1 && maskCtx) {
+        maskHistory.pop(); 
+        maskCtx.putImageData(maskHistory[maskHistory.length - 1], 0, 0);
+    } else if (maskHistory.length === 1) {
+        clearMask();
+    }
+  };
+
+  const clearMask = () => {
+    if (maskCtx && maskCanvas) {
+        maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+        maskHistory = [];
+        saveMaskState(); 
+    }
+  }
+
+  const drawLightMarkers = () => {
+    if (!lightingOverlayCtx || !lightingOverlayCanvas) return;
+    const ctx = lightingOverlayCtx;
+    ctx.clearRect(0, 0, lightingOverlayCanvas.width, lightingOverlayCanvas.height);
+    
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.lineWidth = 2;
+
+    lightMarkers.forEach(marker => {
+        ctx.fillStyle = 'rgba(74, 144, 226, 0.8)';
+        
+        if (marker.shape === 'cone') {
+            ctx.save();
+            ctx.translate(marker.x, marker.y);
+            ctx.rotate(marker.rotation);
+            
+            ctx.beginPath();
+            const tipY = -marker.size * 0.75;
+            const baseY = marker.size * 0.75;
+            const baseHalfWidth = marker.size;
+            
+            ctx.moveTo(0, tipY); 
+            ctx.lineTo(-baseHalfWidth, baseY); 
+            ctx.lineTo(baseHalfWidth, baseY); 
+            ctx.closePath();
+            
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.restore();
+        } else { 
+            ctx.beginPath();
+            ctx.arc(marker.x, marker.y, marker.size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+        }
+    });
+  }
+
+  const clearLightMarkers = () => {
+    lightMarkers = [];
+    drawLightMarkers();
+    if (clearLightSourcesBtn) clearLightSourcesBtn.classList.add('hidden');
+  }
+
+  const hideComparisonView = () => {
+    if (comparisonAfterContainer && comparisonSliderHandle && toggleComparisonBtn) {
+        isComparisonActive = false;
+        comparisonAfterContainer.classList.add('hidden');
+        comparisonSliderHandle.classList.add('hidden');
+        toggleComparisonBtn.classList.remove('active');
+        if (comparisonAfterImage) comparisonAfterImage.src = ''; 
+        toggleComparisonBtn.disabled = true;
+    }
+  };
+
+  // --- UI LOGIC ---
+
   const setGalleryMessage = (message: string, isError = false, isRawText = false) => {
     if (imageGallery) {
       imageGallery.innerHTML = '';
-      const messageEl = document.createElement(isRawText ? 'pre' : 'p'); // Use <pre> for raw text to preserve formatting
+      const messageEl = document.createElement(isRawText ? 'pre' : 'p'); 
       messageEl.textContent = message;
       messageEl.className = isError ? 'error' : 'placeholder';
       if (isRawText) messageEl.classList.add('raw-text-output');
       imageGallery.appendChild(messageEl);
-    }
-  };
-  
-  const updateModalContent = () => {
-    if (!fullscreenImage || !prevImageBtn || !nextImageBtn) return;
-
-    const imagePart = currentGallery[currentImageIndex];
-    fullscreenImage.src = `data:${imagePart.mimeType};base64,${imagePart.data}`;
-    
-    // Update button states
-    prevImageBtn.disabled = currentImageIndex === 0;
-    nextImageBtn.disabled = currentImageIndex === currentGallery.length - 1;
-  };
-
-  const openModal = (sourceGallery: ImagePart[], index: number) => {
-    if (fullscreenModal && fullscreenImage && sourceGallery.length > 0) {
-        currentGallery = sourceGallery;
-        currentImageIndex = index;
-        updateModalContent();
-        fullscreenModal.classList.remove('modal-hidden');
-    }
-  };
-
-  const closeModal = () => {
-    if (fullscreenModal) {
-        fullscreenModal.classList.add('modal-hidden');
-    }
-  };
-
-  const showPrevImage = () => {
-    if (currentImageIndex > 0) {
-        currentImageIndex--;
-        updateModalContent();
-    }
-  };
-
-  const showNextImage = () => {
-    if (currentImageIndex < currentGallery.length - 1) {
-        currentImageIndex++;
-        updateModalContent();
-    }
-  };
-
-  const updateDownloadButtonState = () => {
-    if (downloadSelectedBtn) {
-        const count = selectedHistoryIndices.size;
-        downloadSelectedBtn.disabled = count === 0;
-
-        if (count === 0) {
-            downloadSelectedBtn.textContent = 'Загрузить выбранное';
-        } else if (count === 1) {
-            downloadSelectedBtn.textContent = 'Загрузить 1 изображение';
-        } else {
-            downloadSelectedBtn.textContent = `Загрузить ZIP (${count} изображений)`;
-        }
-    }
-  };
-
-  const handleDownloadSelected = async () => {
-    if (!downloadSelectedBtn || selectedHistoryIndices.size === 0) return;
-
-    const prefix = filenamePrefixInput?.value.trim() || 'image';
-    const selectedCount = selectedHistoryIndices.size;
-
-    downloadSelectedBtn.disabled = true;
-
-    if (selectedCount === 1) {
-        downloadSelectedBtn.textContent = 'Загрузка...';
-        const index = selectedHistoryIndices.values().next().value;
-        const imagePart = history[index];
-        const fileExtension = imagePart.mimeType.split('/')[1] || 'png';
-        const filename = `${prefix}.${fileExtension}`;
-        
-        const link = document.createElement('a');
-        link.href = `data:${imagePart.mimeType};base64,${imagePart.data}`;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-    } else {
-        downloadSelectedBtn.textContent = 'Архивация...';
-        const zip = new JSZip();
-        let count = 1;
-
-        const promises = Array.from(selectedHistoryIndices).map(index => {
-            const imagePart = history[index];
-            const fileExtension = imagePart.mimeType.split('/')[1] || 'png';
-            const filename = `${prefix}_${count++}.${fileExtension}`;
-            
-            // Add file to zip from base64 data
-            return zip.file(filename, imagePart.data, { base64: true });
-        });
-
-        await Promise.all(promises);
-
-        const content = await zip.generateAsync({ type: "blob" });
-        
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(content);
-        link.download = `${prefix}.zip`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(link.href);
-    }
-
-    // Reset button state after download
-    updateDownloadButtonState();
-  };
-
-  const openGalleryModal = () => {
-    if (!galleryModal || !galleryGrid) return;
-    
-    galleryGrid.innerHTML = ''; // Clear previous content
-    selectedHistoryIndices.clear(); // Reset selection
-    updateDownloadButtonState();
-
-    if (history.length === 0) {
-        const placeholder = document.createElement('p');
-        placeholder.className = 'placeholder';
-        placeholder.textContent = 'Your history is empty.';
-        galleryGrid.appendChild(placeholder);
-    } else {
-        history.forEach((imagePart, index) => {
-            const galleryItem = document.createElement('div');
-            galleryItem.className = 'gallery-grid-item';
-            galleryItem.setAttribute('aria-label', `Image ${index + 1} from history`);
-            galleryItem.setAttribute('role', 'button');
-            galleryItem.tabIndex = 0;
-            
-            galleryItem.onclick = () => {
-                if (selectedHistoryIndices.has(index)) {
-                    selectedHistoryIndices.delete(index);
-                    galleryItem.classList.remove('selected');
-                } else {
-                    selectedHistoryIndices.add(index);
-                    galleryItem.classList.add('selected');
-                }
-                updateDownloadButtonState();
-            };
-
-            const img = document.createElement('img');
-            img.src = `data:${imagePart.mimeType};base64,${imagePart.data}`;
-            img.alt = `Generated image ${index + 1}`;
-
-            const overlay = document.createElement('div');
-            overlay.className = 'gallery-item-overlay';
-
-            const actions = document.createElement('div');
-            actions.className = 'gallery-item-actions';
-
-            const selectCheckbox = document.createElement('div');
-            selectCheckbox.className = 'select-checkbox';
-            selectCheckbox.setAttribute('aria-label', 'Select this image');
-            
-            const viewBtn = document.createElement('button');
-            viewBtn.className = 'view-btn';
-            viewBtn.setAttribute('aria-label', 'View this image fullscreen');
-            viewBtn.onclick = (e) => {
-                e.stopPropagation(); // Prevent selection toggle when clicking view
-                openModal(history, index);
-            };
-            
-            actions.appendChild(selectCheckbox);
-            actions.appendChild(viewBtn);
-
-            galleryItem.appendChild(img);
-            galleryItem.appendChild(overlay);
-            galleryItem.appendChild(actions);
-            galleryGrid.appendChild(galleryItem);
-        });
-    }
-
-    galleryModal.classList.remove('modal-hidden');
-  };
-
-  const closeGalleryModal = () => {
-      if (galleryModal) {
-          galleryModal.classList.add('modal-hidden');
-      }
-  };
-
-  const renderHistory = () => {
-    if (!historyGallery) return;
-    historyGallery.innerHTML = '';
-
-    if (history.length === 0) {
-        const placeholder = document.createElement('p');
-        placeholder.className = 'placeholder';
-        placeholder.textContent = 'Generated images will appear here.';
-        historyGallery.appendChild(placeholder);
-        return;
-    }
-
-    // Show only the most recent items in the side panel.
-    // Iterate backwards to ensure newest items are first and indices are correct.
-    const displayCount = 10;
-    const startIndex = Math.max(0, history.length - displayCount);
-    
-    for (let i = history.length - 1; i >= startIndex; i--) {
-        const imagePart = history[i];
-        const originalIndex = i; // This is the guaranteed correct index
-
-        const historyItem = document.createElement('button');
-        historyItem.className = 'history-item';
-        historyItem.setAttribute('aria-label', 'View this image fullscreen or drag to canvas');
-        historyItem.onclick = () => openModal(history, originalIndex);
-
-        // Make the button itself draggable to ensure the event fires reliably.
-        historyItem.draggable = true;
-        historyItem.addEventListener('dragstart', (e) => {
-            try {
-                // Ensure dataTransfer exists before using it
-                if (e.dataTransfer) {
-                    const jsonData = JSON.stringify(imagePart);
-                    e.dataTransfer.setData('application/json', jsonData);
-                    e.dataTransfer.effectAllowed = 'copy';
-                }
-            } catch (error) {
-                console.error("Failed to serialize history item for drag-and-drop:", error);
-            }
-        });
-
-        const img = document.createElement('img');
-        img.src = `data:${imagePart.mimeType};base64,${imagePart.data}`;
-        img.alt = 'Previously generated image';
-        // Prevent the image's default drag behavior from interfering with the button's.
-        img.draggable = false; 
-
-        historyItem.appendChild(img);
-        historyGallery.appendChild(historyItem);
-    }
-  }
-
-  const updateMainUploadLabel = () => {
-    const uploadLabel = appContainer?.querySelector<HTMLSpanElement>('#upload-label span');
-    if (!uploadLabel) return;
-    if (currentMode === 'free' && !uploadedImage) {
-        uploadLabel.textContent = 'Click, drag & drop, or paste an image (optional for generation)';
-    } else {
-        uploadLabel.textContent = 'Click, drag & drop, or paste an image';
-    }
-  }
-
-  const updateReferenceUploadLabel = () => {
-    const uploadLabel = appContainer?.querySelector<HTMLSpanElement>('#reference-upload-label span');
-    if (!uploadLabel) return;
-    if (currentMode === 'lighting') {
-        uploadLabel.textContent = 'Добавьте референс для освещения (необязательно)';
-    } else {
-        uploadLabel.textContent = 'Добавьте референсные изображения (необязательно)';
-    }
-  };
-
-  const updatePromptPlaceholder = () => {
-    if (!promptInput) return;
-    if (currentMode === 'free') {
-        promptInput.placeholder = 'Опишите изображение которое вы хотите сгенерировать'; // Russian text
-    } else if (currentMode === 'analyze') {
-        promptInput.placeholder = 'Что вы хотите узнать об этом изображении?'; // New placeholder for analyze mode
-    } else if (currentMode === 'lighting') {
-        promptInput.placeholder = 'Опишите желаемое освещение или используйте пресет...';
-    } else {
-        promptInput.placeholder = defaultPromptPlaceholder || 'Describe your desired changes...'; // Fallback
     }
   };
 
@@ -423,7 +325,7 @@ if (appContainer) {
         generateBtn.textContent = 'Анализировать изображение';
       } else {
         generateBtn.disabled = !isImageLoaded || !isPromptFilled;
-        generateBtn.textContent = 'Generate'; // Reset to default text for other modes
+        generateBtn.textContent = 'Generate'; 
       }
     }
     
@@ -438,23 +340,53 @@ if (appContainer) {
         btn.disabled = !isImageLoaded;
       });
     }
-
   };
 
-  const fileToImagePart = (file: File): Promise<ImagePart> => {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const dataUrl = e.target?.result as string;
-            const mimeType = dataUrl.substring(dataUrl.indexOf(':') + 1, dataUrl.indexOf(';'));
-            const data = dataUrl.substring(dataUrl.indexOf(',') + 1);
-            resolve({ mimeType, data });
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-    });
+  const updateMainUploadLabel = () => {
+    const uploadLabel = appContainer?.querySelector<HTMLSpanElement>('#upload-label span');
+    if (!uploadLabel) return;
+    if (currentMode === 'free' && !uploadedImage) {
+        uploadLabel.textContent = 'Click, drag & drop, or paste an image (optional for generation)';
+    } else {
+        uploadLabel.textContent = 'Click, drag & drop, or paste an image';
+    }
   }
 
+  const updateReferenceUploadLabel = () => {
+    const labelSpan = appContainer.querySelector<HTMLSpanElement>('#reference-upload-label span') || 
+                     appContainer.querySelector<HTMLSpanElement>('#reference-upload-area span');
+    if (!labelSpan) return;
+
+    if (currentMode === 'lighting') {
+      labelSpan.textContent = 'Upload reference (optional, for lighting style)';
+    } else if (currentMode === 'free') {
+      labelSpan.textContent = 'Upload reference images (style/structure)';
+    } else {
+      labelSpan.textContent = 'Upload reference images';
+    }
+  };
+
+  const updatePromptPlaceholder = () => {
+    if (!promptInput) return;
+    
+    switch (currentMode) {
+      case 'lighting':
+        promptInput.placeholder = 'Describe lighting adjustments (optional)...';
+        break;
+      case 'inpaint':
+        promptInput.placeholder = 'Describe what to generate in the masked area...';
+        break;
+      case 'free':
+        promptInput.placeholder = 'Describe the image you want to create...';
+        break;
+      case 'analyze':
+        promptInput.placeholder = 'Ask a question about the image...';
+        break;
+      default:
+        promptInput.placeholder = defaultPromptPlaceholder || 'Describe your request...';
+    }
+  };
+  
   const analyzeAndSetTemperature = async (imagePart: ImagePart) => {
     if (!temperatureSlider || !temperatureValue) return;
 
@@ -472,7 +404,7 @@ if (appContainer) {
                 ]
             },
             config: {
-                temperature: 0, // We want a deterministic analysis
+                temperature: 0, 
             }
         });
 
@@ -480,7 +412,6 @@ if (appContainer) {
         let tempNum = parseInt(tempStr, 10);
 
         if (!isNaN(tempNum)) {
-            // Clamp the value to be within our slider's range
             tempNum = Math.max(1000, Math.min(10000, tempNum));
             temperatureSlider.value = String(tempNum);
             temperatureValue.textContent = String(tempNum);
@@ -496,16 +427,6 @@ if (appContainer) {
     } finally {
         temperatureSlider.disabled = false;
     }
-};
-
-  const hideComparisonView = () => {
-    if (comparisonAfterContainer && comparisonSliderHandle && toggleComparisonBtn) {
-        isComparisonActive = false;
-        comparisonAfterContainer.classList.add('hidden');
-        comparisonSliderHandle.classList.add('hidden');
-        toggleComparisonBtn.classList.remove('active');
-        if (comparisonAfterImage) comparisonAfterImage.src = ''; // Clear image
-    }
   };
 
   const displayUploadedImage = (imagePart: ImagePart) => {
@@ -520,14 +441,13 @@ if (appContainer) {
 
       imagePreview.src = `data:${imagePart.mimeType};base64,${imagePart.data}`;
       imagePreview.classList.remove('hidden');
-      if (clearImageBtn) clearImageBtn.classList.remove('hidden'); // Show clear button
+      if (clearImageBtn) clearImageBtn.classList.remove('hidden'); 
       clearMask();
       clearLightMarkers();
       hideComparisonView();
       updateButtonState();
       updateMainUploadLabel();
 
-      // If in lighting mode, analyze the image
       if (currentMode === 'lighting') {
         analyzeAndSetTemperature(imagePart);
       }
@@ -544,17 +464,15 @@ if (appContainer) {
         return;
     }
 
-    // Add a label for the reference images
     const label = document.createElement('span');
     label.id = 'reference-image-label';
     label.textContent = 'Reference Images:';
     referencePreviewContainer.appendChild(label);
 
     const gridContainer = document.createElement('div');
-    gridContainer.className = 'reference-grid'; // New class for grid layout
+    gridContainer.className = 'reference-grid';
     
     referenceImages.forEach(newRefImage => {
-        // Create preview element
         const thumbContainer = document.createElement('div');
         thumbContainer.className = 'reference-thumbnail';
         
@@ -568,8 +486,8 @@ if (appContainer) {
         removeBtn.ariaLabel = 'Remove reference image';
         removeBtn.onclick = () => {
             referenceImages = referenceImages.filter(ref => ref.id !== newRefImage.id);
-            renderReferenceImages(); // Re-render to update the display
-            updateButtonState(); // Update button state if needed
+            renderReferenceImages(); 
+            updateButtonState(); 
         };
 
         thumbContainer.appendChild(img);
@@ -580,70 +498,6 @@ if (appContainer) {
     referencePreviewContainer.classList.remove('hidden');
   };
 
-  const processMainImageFile = async (file: File | null) => {
-    if (!file || !file.type.startsWith('image/')) {
-        uploadedImage = null;
-        if (imagePreview) {
-            imagePreview.classList.add('hidden');
-            imagePreview.src = '';
-        }
-        if (imagePreviewContainer) imagePreviewContainer.classList.remove('has-image');
-        if (clearImageBtn) clearImageBtn.classList.add('hidden'); // Hide clear button
-        clearMask();
-        clearLightMarkers();
-        hideComparisonView();
-        updateButtonState();
-        updateMainUploadLabel();
-        return;
-    }
-    const imagePart = await fileToImagePart(file);
-    displayUploadedImage(imagePart);
-  };
-
-  const processReferenceFiles = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-
-    // Filter for image files
-    const newImageFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
-    
-    // Clear existing reference images if you want to replace, or append if you want to add.
-    // For now, let's append to existing references.
-    for (const file of newImageFiles) {
-        const imagePart = await fileToImagePart(file);
-        referenceImages.push({ ...imagePart, id: Date.now() + Math.random() });
-    }
-    
-    renderReferenceImages(); // Update the display of reference images
-    updateButtonState();
-  };
-
-  const handleImageUploadEvent = (event: Event) => {
-    const target = event.target as HTMLInputElement;
-    const files = target.files;
-    if (files && files.length > 0) {
-        processMainImageFile(files[0]); // Only take the first file for the main image
-    }
-  };
-
-  const handleReferenceUploadEvent = (event: Event) => {
-    const target = event.target as HTMLInputElement;
-    const files = target.files;
-    if (files && files.length > 0) {
-        processReferenceFiles(files);
-        // Clear the input value so the same file can be uploaded again if needed
-        target.value = ''; 
-    }
-  };
-
-  const isCanvasBlank = (canvas: HTMLCanvasElement): boolean => {
-    if (canvas.width === 0 || canvas.height === 0) return true; // Fix: Prevent error on 0-sized canvas
-    return !canvas.getContext('2d')?.getImageData(0, 0, canvas.width, canvas.height).data.some(channel => channel !== 0);
-  }
-  
-  /**
-   * Resizes a reference image to match the main image's aspect ratio via letterboxing.
-   * This prevents the model from changing the output image's aspect ratio.
-   */
   const resizeRefToMatchAspectRatio = (
     refImagePart: ImagePart,
     targetWidth: number,
@@ -660,8 +514,7 @@ if (appContainer) {
                   return reject(new Error('Could not get canvas context'));
               }
 
-              // Fill background with a neutral color
-              ctx.fillStyle = '#808080'; // Mid-gray
+              ctx.fillStyle = '#808080'; 
               ctx.fillRect(0, 0, targetWidth, targetHeight);
 
               const scale = Math.min(targetWidth / refImg.naturalWidth, targetHeight / refImg.naturalHeight);
@@ -672,7 +525,6 @@ if (appContainer) {
 
               ctx.drawImage(refImg, x, y, newWidth, newHeight);
 
-              // Use PNG to avoid quality loss from re-compression
               const dataUrl = canvas.toDataURL('image/png');
               const mimeType = 'image/png';
               const data = dataUrl.substring(dataUrl.indexOf(',') + 1);
@@ -683,6 +535,8 @@ if (appContainer) {
           refImg.src = `data:${refImagePart.mimeType};base64,${refImagePart.data}`;
       });
   };
+
+  // --- MAIN LOGIC ---
 
   const handleGenerateClick = async () => {
     if (!generateBtn || !imageGallery) {
@@ -713,15 +567,14 @@ if (appContainer) {
     resultContainer?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     setGalleryMessage(`Generating ${generationCount} image(s)...`);
 
-    // Yield to the event loop to allow the UI to update with the "Generating..." message
     await new Promise(resolve => setTimeout(resolve, 20));
 
     try {
-      resultImages = []; // Clear previous results
+      resultImages = []; 
       let currentModelName: string;
       let generationAPI: 'generateContent' | 'generateImages';
       let apiRequestPayload: any;
-      let isTextOutputMode = false; // Flag to check if the mode is for text output
+      let isTextOutputMode = false; 
 
       // --- Determine Model and API based on Mode and Input ---
       if (currentMode === 'lighting') {
@@ -802,7 +655,6 @@ if (appContainer) {
                   },
               };
           } else {
-              // No light markers, use sliders and text input
               if (promptInput?.value.trim()) {
                 finalPrompt = promptInput.value.trim();
               } else {
@@ -826,54 +678,52 @@ if (appContainer) {
           }
       } else if (currentMode === 'analyze') {
           isTextOutputMode = true;
-          currentModelName = 'gemini-3-pro-preview'; // Use Pro model for better reasoning
+          currentModelName = 'gemini-3-pro-preview'; 
           generationAPI = 'generateContent';
           
           const allPartsForAnalyze: (object)[] = [];
           if (uploadedImage) {
               allPartsForAnalyze.push({ inlineData: { data: uploadedImage.data, mimeType: uploadedImage.mimeType } });
           }
-          // Add all reference images
           const referenceImagePartsForAnalyze = referenceImages.map(refImg => ({
               inlineData: { data: refImg.data, mimeType: refImg.mimeType }
           }));
           allPartsForAnalyze.push(...referenceImagePartsForAnalyze);
-          allPartsForAnalyze.push({ text: finalPrompt }); // Prompt always last
+          allPartsForAnalyze.push({ text: finalPrompt }); 
 
           apiRequestPayload = {
               model: currentModelName,
               contents: { parts: allPartsForAnalyze },
               config: {
-                  responseModalities: [Modality.TEXT], // Expecting text output
+                  responseModalities: [Modality.TEXT], 
                   temperature: temperature,
               },
           };
       }
-      else if (currentMode === 'free' && !uploadedImage) {
-          // Free mode, no main image uploaded
+      else if (currentMode === 'free') {
+          // Free mode: Strictly IGNORE the main image (uploadedImage), even if it exists.
+          
           if (referenceImages.length > 0) {
-              // Free mode, no main image, but references are present.
-              // Use gemini-2.5-flash-image-preview for text + multiple images.
-              currentModelName = 'gemini-2.5-flash-image'; // Changed to official model name
+              // Free mode with references (Text + Images).
+              currentModelName = 'gemini-2.5-flash-image'; 
               generationAPI = 'generateContent';
               const allParts: (object)[] = [];
               const referenceImageParts = referenceImages.map(refImg => ({
                   inlineData: { data: refImg.data, mimeType: refImg.mimeType }
               }));
               allParts.push(...referenceImageParts);
-              allParts.push({ text: finalPrompt }); // Prompt always last
+              allParts.push({ text: finalPrompt }); 
               
               apiRequestPayload = {
                   model: currentModelName,
                   contents: { parts: allParts },
                   config: {
-                      responseModalities: [Modality.IMAGE], // Only image output expected
+                      responseModalities: [Modality.IMAGE], 
                       temperature: temperature,
                   },
               };
           } else {
-              // Free mode, no main image, no references. Pure text-to-image.
-              // Use imagen-4.0-generate-001.
+              // Free mode, no references. Pure text-to-image.
               currentModelName = 'imagen-4.0-generate-001';
               generationAPI = 'generateImages';
               apiRequestPayload = {
@@ -881,15 +731,14 @@ if (appContainer) {
                   prompt: finalPrompt,
                   config: {
                       numberOfImages: generationCount,
-                      outputMimeType: 'image/jpeg', // Imagen always outputs JPEG
+                      outputMimeType: 'image/png', // CHANGED to PNG as requested
                       aspectRatio: selectedAspectRatio,
                   },
               };
           }
       } else {
-          // All other modes OR Free mode with a main image uploaded.
-          // Use gemini-2.5-flash-image (image editing/multi-modal generation).
-          currentModelName = 'gemini-2.5-flash-image'; // Changed to official model name
+          // All other modes (Character, Match3, Inpaint, Sketch)
+          currentModelName = 'gemini-2.5-flash-image'; 
           generationAPI = 'generateContent';
           const allParts: (object)[] = [];
 
@@ -900,7 +749,7 @@ if (appContainer) {
               });
           }
           
-          // 2. Add mask if in inpaint mode and canvas is not blank
+          // 2. Add mask if in inpaint mode
           if (currentMode === 'inpaint' && maskCanvas && imagePreview && !isCanvasBlank(maskCanvas) && uploadedImage) {
               const originalWidth = imagePreview.naturalWidth;
               const originalHeight = imagePreview.naturalHeight;
@@ -945,8 +794,7 @@ if (appContainer) {
           }
           
           // 3. Add reference images, pre-processing them to match the main image's aspect ratio.
-          // Only if NOT in 'inpaint' mode, as inpaint focuses on main image + mask
-          if (currentMode !== 'inpaint' && referenceImages.length > 0 && uploadedImage) { // References are only used with a main image in this scenario
+          if (currentMode !== 'inpaint' && referenceImages.length > 0 && uploadedImage) { 
               let processedReferenceImages: ImagePart[] = referenceImages;
               try {
                   const mainImageDimensions = await new Promise<{width: number, height: number}>((resolve, reject) => {
@@ -972,7 +820,6 @@ if (appContainer) {
               }));
               allParts.push(...referenceImageParts);
               
-              // Add explicit instructions to the prompt for the model to preserve dimensions.
               finalPrompt = `This is an image editing task with references. You are given a primary image to edit, and one or more reference images. **Do not edit the reference images.** Your task is to apply the requested edit to the primary image only, using the reference images for guidance. The primary image is the first one in the sequence. Preserve its aspect ratio. The user's request is: "${finalPrompt}"`;
           }
 
@@ -983,7 +830,7 @@ if (appContainer) {
               model: currentModelName,
               contents: { parts: allParts },
               config: {
-                  responseModalities: [Modality.IMAGE], // Only image output expected for editing modes
+                  responseModalities: [Modality.IMAGE],
                   temperature: temperature,
               },
           };
@@ -995,7 +842,7 @@ if (appContainer) {
       let attempts = 0;
       
       while(resultImages.length < activeGenCount && attempts < MAX_TOTAL_ATTEMPTS) {
-          if (isTextOutputMode) { // For text output, only one "generation" makes sense
+          if (isTextOutputMode) { 
               generationCount = 1;
           }
           const needed = activeGenCount - resultImages.length;
@@ -1014,11 +861,10 @@ if (appContainer) {
                   if (result.status === 'fulfilled') {
                       const response = result.value;
                       if (isTextOutputMode) {
-                          // Display text directly for analyze mode
                           imageGallery.innerHTML = '';
                           const textResult = response.text;
-                          setGalleryMessage(textResult, false, true); // Display as raw text
-                          break; // For text output, we only need one response
+                          setGalleryMessage(textResult, false, true); 
+                          break; 
                       } else {
                           if (response.candidates && response.candidates.length > 0) {
                               const imagePartFound = response.candidates[0].content.parts.find(part => part.inlineData);
@@ -1034,12 +880,10 @@ if (appContainer) {
                       }
                   } else { console.error('A generation request failed:', result.reason); }
               }
-              if (isTextOutputMode) break; // Exit loop after processing text
+              if (isTextOutputMode) break; 
           } else if (generationAPI === 'generateImages') {
-              // For generateImages, it generates 'numberOfImages' in one call.
-              // We will make one call for the 'needed' images.
               const imgRequestPayload = { ...apiRequestPayload, config: { ...apiRequestPayload.config, numberOfImages: needed } };
-              attempts += needed; // Count this as 'needed' attempts, even if one call
+              attempts += needed; 
 
               try {
                   const response = await ai.models.generateImages(imgRequestPayload);
@@ -1048,7 +892,7 @@ if (appContainer) {
                           if (genImage.image?.imageBytes) {
                               if (resultImages.length < activeGenCount) {
                                   resultImages.push({
-                                      mimeType: 'image/jpeg', // Imagen always outputs JPEG
+                                      mimeType: 'image/png', // Force PNG client side MIME if received
                                       data: genImage.image.imageBytes,
                                   });
                               }
@@ -1062,16 +906,16 @@ if (appContainer) {
           }
       }
 
-      // After retries, render what we have.
       if (resultImages.length > 0) {
-        imageGallery.innerHTML = ''; // Clear final loading message.
+        imageGallery.innerHTML = ''; 
         
-        if (currentMode === 'lighting' && uploadedImage && comparisonAfterImage) {
-            // Use the first generated image for the initial comparison view
+        // Check if we should enable comparison (Supported modes AND original image exists)
+        const supportsComparison = ['character', 'sketch', 'inpaint', 'match3', 'lighting'].includes(currentMode);
+
+        if (supportsComparison && uploadedImage && comparisonAfterImage) {
             const newImagePart = resultImages[0];
             comparisonAfterImage.src = `data:${newImagePart.mimeType};base64,${newImagePart.data}`;
             
-            // Enable the comparison button
             if (toggleComparisonBtn) {
                 toggleComparisonBtn.disabled = false;
             }
@@ -1083,13 +927,13 @@ if (appContainer) {
             galleryButton.setAttribute('aria-label', 'View this image fullscreen');
             
             galleryButton.onclick = () => {
-                // If in lighting mode, update the 'after' image for comparison
-                if (currentMode === 'lighting' && comparisonAfterImage && toggleComparisonBtn) {
+                // Update comparison image on click if supported
+                const supportsComparison = ['character', 'sketch', 'inpaint', 'match3', 'lighting'].includes(currentMode);
+                if (supportsComparison && uploadedImage && comparisonAfterImage && toggleComparisonBtn) {
                     const clickedImage = resultImages[index];
                     comparisonAfterImage.src = `data:${clickedImage.mimeType};base64,${clickedImage.data}`;
-                    toggleComparisonBtn.disabled = false; // Ensure button is enabled
+                    toggleComparisonBtn.disabled = false; 
                 }
-                // Always open the modal for a fullscreen view
                 openModal(resultImages, index);
             };
 
@@ -1101,7 +945,6 @@ if (appContainer) {
             imageGallery.appendChild(galleryButton);
         });
         
-        // If we couldn't generate all images, inform the user.
         if (resultImages.length < activeGenCount) {
             const warningEl = document.createElement('p');
             warningEl.textContent = `Could only generate ${resultImages.length} of the requested ${activeGenCount} images.`;
@@ -1109,8 +952,6 @@ if (appContainer) {
             imageGallery.appendChild(warningEl);
         }
 
-        // --- History Management ---
-        // Only add images to history, not text analysis results
         if (!isTextOutputMode) {
             history.push(...resultImages);
             if (history.length > MAX_HISTORY_SIZE) {
@@ -1119,9 +960,9 @@ if (appContainer) {
             renderHistory();
         }
 
-      } else if (!isTextOutputMode) { // This block runs if resultImages is still empty after all retries and it's not a text output mode.
+      } else if (!isTextOutputMode) { 
         setGalleryMessage('The model did not return any images after multiple retries. Please try a different prompt or check your connection.', true);
-      } else if (isTextOutputMode && imageGallery.innerHTML === '') { // If analyze mode and no text was set
+      } else if (isTextOutputMode && imageGallery.innerHTML === '') { 
         setGalleryMessage('The model did not return any analysis text. Please try again.', true, true);
       }
     } catch (error) {
@@ -1129,7 +970,7 @@ if (appContainer) {
       setGalleryMessage('An error occurred. Please check the console for details.', true);
     } finally {
       if (promptInput && currentMode === 'lighting') {
-          promptInput.value = ''; // Clear prompt after lighting generation
+          promptInput.value = ''; 
           clearLightMarkers();
           if (toggleLightPlacementBtn && lightProperties) {
               isPlacingLight = false;
@@ -1142,6 +983,56 @@ if (appContainer) {
     }
   };
   
+  // --- EVENT HANDLERS ---
+
+  const processMainImageFile = async (file: File | null) => {
+    if (!file || !file.type.startsWith('image/')) {
+        uploadedImage = null;
+        if (imagePreview) {
+            imagePreview.classList.add('hidden');
+            imagePreview.src = '';
+        }
+        if (imagePreviewContainer) imagePreviewContainer.classList.remove('has-image');
+        if (clearImageBtn) clearImageBtn.classList.add('hidden'); 
+        clearMask();
+        clearLightMarkers();
+        hideComparisonView();
+        updateButtonState();
+        updateMainUploadLabel();
+        return;
+    }
+    const imagePart = await fileToImagePart(file);
+    displayUploadedImage(imagePart);
+  };
+
+  const processReferenceFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const newImageFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
+    for (const file of newImageFiles) {
+        const imagePart = await fileToImagePart(file);
+        referenceImages.push({ ...imagePart, id: Date.now() + Math.random() });
+    }
+    renderReferenceImages(); 
+    updateButtonState();
+  };
+
+  const handleImageUploadEvent = (event: Event) => {
+    const target = event.target as HTMLInputElement;
+    const files = target.files;
+    if (files && files.length > 0) {
+        processMainImageFile(files[0]); 
+    }
+  };
+
+  const handleReferenceUploadEvent = (event: Event) => {
+    const target = event.target as HTMLInputElement;
+    const files = target.files;
+    if (files && files.length > 0) {
+        processReferenceFiles(files);
+        target.value = ''; 
+    }
+  };
+
   const handleDragOver = (e: DragEvent) => {
     e.preventDefault();
     imagePreviewContainer?.classList.add('drag-over');
@@ -1156,12 +1047,10 @@ if (appContainer) {
     e.preventDefault();
     imagePreviewContainer?.classList.remove('drag-over');
     
-    // Check for a dropped history item first (as JSON for robustness)
     const historyItemJson = e.dataTransfer?.getData('application/json');
     if (historyItemJson) {
         try {
             const imagePart: ImagePart = JSON.parse(historyItemJson);
-            // Basic validation
             if (imagePart && typeof imagePart.mimeType === 'string' && typeof imagePart.data === 'string') {
                 const file = new File([Uint8Array.from(atob(imagePart.data), c => c.charCodeAt(0))], 'dropped_history_image.png', { type: imagePart.mimeType });
                 processMainImageFile(file);
@@ -1169,13 +1058,12 @@ if (appContainer) {
         } catch (err) {
             console.error("Failed to parse dropped history item:", err);
         }
-        return; // Stop further processing
+        return; 
     }
 
-    // Fallback to file drop for main image
     const files = e.dataTransfer?.files;
     if (files && files.length > 0) {
-        processMainImageFile(files[0]); // Only take the first file for the main image
+        processMainImageFile(files[0]); 
     }
   };
 
@@ -1215,7 +1103,7 @@ if (appContainer) {
             const file = items[i].getAsFile();
             if (file) {
                 pastedImageFile = file;
-                break; // Take only the first image from paste for the main image
+                break; 
             }
         }
     }
@@ -1225,62 +1113,16 @@ if (appContainer) {
     }
   };
 
-  // --- Inpainting canvas functions ---
-
-  const updateBrushCursorSize = () => {
-    if (brushCursor && brushSizeSlider) {
-        const size = parseInt(brushSizeSlider.value, 10);
-        brushCursor.style.width = `${size}px`;
-        brushCursor.style.height = `${size}px`;
-    }
-  };
-
-  const saveMaskState = () => {
-    // Fix: Prevent error on 0-sized canvas
-    if (maskCtx && maskCanvas && maskCanvas.width > 0 && maskCanvas.height > 0) {
-        maskHistory.push(maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height));
-    }
-  };
-
-  const undoLastMaskAction = () => {
-    if (maskHistory.length > 1 && maskCtx) {
-        maskHistory.pop(); // Remove current state
-        maskCtx.putImageData(maskHistory[maskHistory.length - 1], 0, 0); // Restore previous
-    } else if (maskHistory.length === 1) {
-        // If only one state is left, it's the initial blank one, so just clear
-        clearMask();
-    }
-  };
-
-  const clearMask = () => {
-    if (maskCtx && maskCanvas) {
-        maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-        maskHistory = [];
-        saveMaskState(); // Save the initial blank state
-    }
-  }
-
-  const getCoords = (e: MouseEvent | TouchEvent, canvas: HTMLCanvasElement): {x: number, y: number} | null => {
-    if (!canvas) return null;
-    const rect = canvas.getBoundingClientRect();
-    const event = 'touches' in e ? e.touches[0] : e;
-    return {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top
-    };
-  }
-  
   const startDrawing = (e: MouseEvent | TouchEvent) => {
     e.preventDefault();
     const coords = getCoords(e, maskCanvas!);
     if (!maskCtx || !coords) return;
     
-    saveMaskState(); // Save state before drawing starts
+    saveMaskState(); 
 
     isDrawing = true;
     [lastX, lastY] = [coords.x, coords.y];
 
-    // Draw a single dot for clicks without dragging
     maskCtx.beginPath();
     maskCtx.arc(coords.x, coords.y, maskCtx.lineWidth / 2, 0, Math.PI * 2);
     maskCtx.fill();
@@ -1302,56 +1144,9 @@ if (appContainer) {
   const stopDrawing = () => {
     if (isDrawing) {
         isDrawing = false;
-        maskCtx?.beginPath(); // Reset the path
+        maskCtx?.beginPath(); 
     }
   };
-
-  // --- Lighting Canvas Functions ---
-  const drawLightMarkers = () => {
-    if (!lightingOverlayCtx || !lightingOverlayCanvas) return;
-    const ctx = lightingOverlayCtx;
-    ctx.clearRect(0, 0, lightingOverlayCanvas.width, lightingOverlayCanvas.height);
-    
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-    ctx.lineWidth = 2;
-
-    lightMarkers.forEach(marker => {
-        ctx.fillStyle = 'rgba(74, 144, 226, 0.8)';
-        
-        if (marker.shape === 'cone') {
-            ctx.save();
-            ctx.translate(marker.x, marker.y);
-            ctx.rotate(marker.rotation);
-            
-            ctx.beginPath();
-            // Draw a cone shape pointing up from (0,0) relative to the marker's center
-            const tipY = -marker.size * 0.75;
-            const baseY = marker.size * 0.75;
-            const baseHalfWidth = marker.size;
-            
-            ctx.moveTo(0, tipY); // Tip
-            ctx.lineTo(-baseHalfWidth, baseY); // Bottom left
-            ctx.lineTo(baseHalfWidth, baseY); // Bottom right
-            ctx.closePath();
-            
-            ctx.fill();
-            ctx.stroke();
-
-            ctx.restore();
-        } else { // Circle
-            ctx.beginPath();
-            ctx.arc(marker.x, marker.y, marker.size, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.stroke();
-        }
-    });
-  }
-
-  const clearLightMarkers = () => {
-    lightMarkers = [];
-    drawLightMarkers();
-    if (clearLightSourcesBtn) clearLightSourcesBtn.classList.add('hidden');
-  }
 
   const setupCanvases = () => {
     if (!maskCanvas || !imagePreview || !brushSizeSlider || !brushCursor || !lightingOverlayCanvas || !lightSizeSlider || !lightShapeSelector || !imageViewport) return;
@@ -1365,7 +1160,6 @@ if (appContainer) {
     maskCtx.lineCap = 'round';
     maskCtx.lineJoin = 'round';
     
-    // Sync canvas size with image size
     const resizeObserver = new ResizeObserver(entries => {
         for (const entry of entries) {
             const { width, height } = entry.contentRect;
@@ -1375,12 +1169,10 @@ if (appContainer) {
             lightingOverlayCanvas.height = height;
 
             if (comparisonAfterImage) {
-                // Ensure the "after" image container scales with the "before" image
                 comparisonAfterImage.style.width = `${width}px`;
                 comparisonAfterImage.style.height = `${height}px`;
             }
 
-            // Re-apply settings as they can be reset on resize
             if(maskCtx) {
                 maskCtx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
                 maskCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
@@ -1388,13 +1180,12 @@ if (appContainer) {
                 maskCtx.lineCap = 'round';
                 maskCtx.lineJoin = 'round';
             }
-            clearMask(); // Clear mask on resize
-            clearLightMarkers(); // Clear markers on resize
+            clearMask(); 
+            clearLightMarkers(); 
         }
     });
     resizeObserver.observe(imagePreview);
 
-    // Custom cursor logic
     updateBrushCursorSize();
     maskCanvas.addEventListener('mouseenter', () => brushCursor.classList.remove('hidden'));
     maskCanvas.addEventListener('mouseleave', () => brushCursor.classList.add('hidden'));
@@ -1404,7 +1195,6 @@ if (appContainer) {
         draw(e);
     });
 
-    // Drawing Listeners
     maskCanvas.addEventListener('mousedown', startDrawing);
     maskCanvas.addEventListener('mouseup', stopDrawing);
     maskCanvas.addEventListener('mouseout', stopDrawing);
@@ -1412,15 +1202,13 @@ if (appContainer) {
     maskCanvas.addEventListener('touchmove', draw, { passive: false });
     maskCanvas.addEventListener('touchend', stopDrawing);
 
-    saveMaskState(); // Save initial blank state
+    saveMaskState(); 
 
-    // Light Marker Listeners
     lightingOverlayCanvas.addEventListener('mousedown', (e) => {
         if (!isPlacingLight) return;
         const coords = getCoords(e, lightingOverlayCanvas);
         if (!coords) return;
 
-        // Check if clicking an existing cone marker to start rotation
         const clickedMarker = lightMarkers.find(marker => {
              const dx = marker.x - coords.x;
              const dy = marker.y - coords.y;
@@ -1431,7 +1219,6 @@ if (appContainer) {
             draggedMarker = clickedMarker;
             imageViewport.classList.add('grabbing');
         } else {
-            // Add new marker
             const size = parseInt(lightSizeSlider.value, 10);
             const shape = lightShapeSelector.querySelector<HTMLInputElement>('input[name="light-shape"]:checked')?.value as 'circle' | 'cone';
             lightMarkers.push({ ...coords, size, shape, rotation: 0 });
@@ -1446,7 +1233,7 @@ if (appContainer) {
             if (coords) {
                 const dx = coords.x - draggedMarker.x;
                 const dy = coords.y - draggedMarker.y;
-                draggedMarker.rotation = Math.atan2(dy, dx) - Math.PI / 2; // Point up at 0 rad
+                draggedMarker.rotation = Math.atan2(dy, dx) - Math.PI / 2; 
                 drawLightMarkers();
             }
         }
@@ -1461,12 +1248,236 @@ if (appContainer) {
     lightingOverlayCanvas.addEventListener('mouseleave', stopDraggingMarker);
   };
 
+  // --- MODAL & GALLERY LOGIC ---
+
+  const updateModalContent = () => {
+    if (!fullscreenImage || !prevImageBtn || !nextImageBtn) return;
+
+    const imagePart = currentGallery[currentImageIndex];
+    fullscreenImage.src = `data:${imagePart.mimeType};base64,${imagePart.data}`;
+    
+    prevImageBtn.disabled = currentImageIndex === 0;
+    nextImageBtn.disabled = currentImageIndex === currentGallery.length - 1;
+  };
+
+  const openModal = (sourceGallery: ImagePart[], index: number) => {
+    if (fullscreenModal && fullscreenImage && sourceGallery.length > 0) {
+        currentGallery = sourceGallery;
+        currentImageIndex = index;
+        updateModalContent();
+        fullscreenModal.classList.remove('modal-hidden');
+    }
+  };
+
+  const closeModal = () => {
+    if (fullscreenModal) {
+        fullscreenModal.classList.add('modal-hidden');
+    }
+  };
+
+  const showPrevImage = () => {
+    if (currentImageIndex > 0) {
+        currentImageIndex--;
+        updateModalContent();
+    }
+  };
+
+  const showNextImage = () => {
+    if (currentImageIndex < currentGallery.length - 1) {
+        currentImageIndex++;
+        updateModalContent();
+    }
+  };
+
+  const updateDownloadButtonState = () => {
+    if (downloadSelectedBtn) {
+        const count = selectedHistoryIndices.size;
+        downloadSelectedBtn.disabled = count === 0;
+
+        if (count === 0) {
+            downloadSelectedBtn.textContent = 'Загрузить выбранное';
+        } else if (count === 1) {
+            downloadSelectedBtn.textContent = 'Загрузить 1 изображение';
+        } else {
+            downloadSelectedBtn.textContent = `Загрузить ZIP (${count} изображений)`;
+        }
+    }
+  };
+
+  const handleDownloadSelected = async () => {
+    if (!downloadSelectedBtn || selectedHistoryIndices.size === 0) return;
+
+    const prefix = filenamePrefixInput?.value.trim() || 'image';
+    const selectedCount = selectedHistoryIndices.size;
+
+    downloadSelectedBtn.disabled = true;
+
+    if (selectedCount === 1) {
+        downloadSelectedBtn.textContent = 'Загрузка...';
+        const index = selectedHistoryIndices.values().next().value;
+        const imagePart = history[index];
+        const fileExtension = imagePart.mimeType.split('/')[1] || 'png';
+        const filename = `${prefix}.${fileExtension}`;
+        
+        const link = document.createElement('a');
+        link.href = `data:${imagePart.mimeType};base64,${imagePart.data}`;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    } else {
+        downloadSelectedBtn.textContent = 'Архивация...';
+        const zip = new JSZip();
+        let count = 1;
+
+        const promises = Array.from(selectedHistoryIndices).map(index => {
+            const imagePart = history[index];
+            const fileExtension = imagePart.mimeType.split('/')[1] || 'png';
+            const filename = `${prefix}_${count++}.${fileExtension}`;
+            return zip.file(filename, imagePart.data, { base64: true });
+        });
+
+        await Promise.all(promises);
+
+        const content = await zip.generateAsync({ type: "blob" });
+        
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(content);
+        link.download = `${prefix}.zip`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+    }
+
+    updateDownloadButtonState();
+  };
+
+  const openGalleryModal = () => {
+    if (!galleryModal || !galleryGrid) return;
+    
+    galleryGrid.innerHTML = ''; 
+    selectedHistoryIndices.clear(); 
+    updateDownloadButtonState();
+
+    if (history.length === 0) {
+        const placeholder = document.createElement('p');
+        placeholder.className = 'placeholder';
+        placeholder.textContent = 'Your history is empty.';
+        galleryGrid.appendChild(placeholder);
+    } else {
+        history.forEach((imagePart, index) => {
+            const galleryItem = document.createElement('div');
+            galleryItem.className = 'gallery-grid-item';
+            galleryItem.setAttribute('aria-label', `Image ${index + 1} from history`);
+            galleryItem.setAttribute('role', 'button');
+            galleryItem.tabIndex = 0;
+            
+            galleryItem.onclick = () => {
+                if (selectedHistoryIndices.has(index)) {
+                    selectedHistoryIndices.delete(index);
+                    galleryItem.classList.remove('selected');
+                } else {
+                    selectedHistoryIndices.add(index);
+                    galleryItem.classList.add('selected');
+                }
+                updateDownloadButtonState();
+            };
+
+            const img = document.createElement('img');
+            img.src = `data:${imagePart.mimeType};base64,${imagePart.data}`;
+            img.alt = `Generated image ${index + 1}`;
+
+            const overlay = document.createElement('div');
+            overlay.className = 'gallery-item-overlay';
+
+            const actions = document.createElement('div');
+            actions.className = 'gallery-item-actions';
+
+            const selectCheckbox = document.createElement('div');
+            selectCheckbox.className = 'select-checkbox';
+            selectCheckbox.setAttribute('aria-label', 'Select this image');
+            
+            const viewBtn = document.createElement('button');
+            viewBtn.className = 'view-btn';
+            viewBtn.setAttribute('aria-label', 'View this image fullscreen');
+            viewBtn.onclick = (e) => {
+                e.stopPropagation(); 
+                openModal(history, index);
+            };
+            
+            actions.appendChild(selectCheckbox);
+            actions.appendChild(viewBtn);
+
+            galleryItem.appendChild(img);
+            galleryItem.appendChild(overlay);
+            galleryItem.appendChild(actions);
+            galleryGrid.appendChild(galleryItem);
+        });
+    }
+
+    galleryModal.classList.remove('modal-hidden');
+  };
+
+  const closeGalleryModal = () => {
+      if (galleryModal) {
+          galleryModal.classList.add('modal-hidden');
+      }
+  };
+
+  const renderHistory = () => {
+    if (!historyGallery) return;
+    historyGallery.innerHTML = '';
+
+    if (history.length === 0) {
+        const placeholder = document.createElement('p');
+        placeholder.className = 'placeholder';
+        placeholder.textContent = 'Generated images will appear here.';
+        historyGallery.appendChild(placeholder);
+        return;
+    }
+
+    const displayCount = 10;
+    const startIndex = Math.max(0, history.length - displayCount);
+    
+    for (let i = history.length - 1; i >= startIndex; i--) {
+        const imagePart = history[i];
+        const originalIndex = i; 
+
+        const historyItem = document.createElement('button');
+        historyItem.className = 'history-item';
+        historyItem.setAttribute('aria-label', 'View this image fullscreen or drag to canvas');
+        historyItem.onclick = () => openModal(history, originalIndex);
+
+        historyItem.draggable = true;
+        historyItem.addEventListener('dragstart', (e) => {
+            try {
+                if (e.dataTransfer) {
+                    const jsonData = JSON.stringify(imagePart);
+                    e.dataTransfer.setData('application/json', jsonData);
+                    e.dataTransfer.effectAllowed = 'copy';
+                }
+            } catch (error) {
+                console.error("Failed to serialize history item for drag-and-drop:", error);
+            }
+        });
+
+        const img = document.createElement('img');
+        img.src = `data:${imagePart.mimeType};base64,${imagePart.data}`;
+        img.alt = 'Previously generated image';
+        img.draggable = false; 
+
+        historyItem.appendChild(img);
+        historyGallery.appendChild(historyItem);
+    }
+  }
+
 
   // Initial state and event listeners
   if (imageUploadInput && promptInput && generateBtn && imagePreviewContainer && modeTabs && presetButtonsContainer && resultContainer && referenceUploadInput && referenceUploadArea && aspectRatioSelector && inpaintControls && brushSizeSlider && brushModeBtn && eraserModeBtn && undoMaskBtn && clearMaskBtn && removeMaskBtn && mainImageUploadContainer && promptInputContainer && fqaContentContainer && negativePromptContainer && creativitySliderContainer && generationCountSelector && lightingControlsContainer && temperatureSlider && temperatureValue && lightColorPicker && lightingOverlayCanvas && imageViewport && imageOverlayControls && toggleComparisonBtn && toggleLightPlacementBtn && lightProperties && lightSizeSlider && lightShapeSelector && clearLightSourcesBtn && comparisonAfterContainer && comparisonAfterImage && comparisonSliderHandle) {
     
     if (promptInput) {
-        defaultPromptPlaceholder = promptInput.placeholder; // Capture default
+        defaultPromptPlaceholder = promptInput.placeholder; 
     }
 
     imageUploadInput.addEventListener('change', handleImageUploadEvent);
@@ -1474,13 +1485,11 @@ if (appContainer) {
     promptInput.addEventListener('input', updateButtonState);
     generateBtn.addEventListener('click', handleGenerateClick);
     
-    // Lighting slider listener
     temperatureSlider.addEventListener('input', () => {
         const value = parseInt(temperatureSlider.value, 10);
         temperatureValue.textContent = String(value);
     });
 
-    // Lighting placement listeners (Overlay)
     toggleLightPlacementBtn.addEventListener('click', () => {
         isPlacingLight = !isPlacingLight;
         toggleLightPlacementBtn.classList.toggle('active', isPlacingLight);
@@ -1496,19 +1505,17 @@ if (appContainer) {
     
     clearLightSourcesBtn.addEventListener('click', clearLightMarkers);
     
-    // Lighting preset buttons
     lightingPresetButtons.forEach(button => {
         button.addEventListener('click', () => {
             if (!uploadedImage || !promptInput) return;
             const prompt = button.dataset.prompt;
             if (prompt) {
                 promptInput.value = prompt;
-                handleGenerateClick(); // Immediately generate on preset click
+                handleGenerateClick(); 
             }
         });
     });
 
-    // Before/After Slider Logic
     toggleComparisonBtn.addEventListener('click', () => {
         if (toggleComparisonBtn.disabled) return;
         isComparisonActive = !isComparisonActive;
@@ -1520,14 +1527,14 @@ if (appContainer) {
     const moveSlider = (clientX: number) => {
         const rect = imageViewport.getBoundingClientRect();
         let x = clientX - rect.left;
-        x = Math.max(0, Math.min(rect.width, x)); // Clamp within bounds
+        x = Math.max(0, Math.min(rect.width, x)); 
         const percent = (x / rect.width) * 100;
         comparisonSliderHandle.style.left = `${percent}%`;
         comparisonAfterContainer.style.width = `${percent}%`;
     };
 
     comparisonSliderHandle.addEventListener('mousedown', (e) => {
-        e.stopPropagation(); // Prevent bubbling to the container
+        e.stopPropagation(); 
         isDraggingSlider = true;
         imageViewport.classList.add('grabbing');
     });
@@ -1547,14 +1554,12 @@ if (appContainer) {
         }
     });
 
-    // Creativity slider listener
     if (creativitySlider && creativityValue) {
         creativitySlider.addEventListener('input', () => {
             creativityValue.textContent = creativitySlider.value;
         });
     }
 
-    // Number of images selection
     numButtons.forEach(button => {
         button.addEventListener('click', () => {
             generationCount = parseInt(button.dataset.count || '1', 10);
@@ -1567,7 +1572,6 @@ if (appContainer) {
         });
     });
 
-    // Aspect Ratio selection
     aspectRatioButtons.forEach(button => {
       button.addEventListener('click', () => {
         selectedAspectRatio = button.dataset.ratio || '1:1';
@@ -1580,18 +1584,15 @@ if (appContainer) {
       });
     });
 
-    // Clear image button listener
     if (clearImageBtn) {
         clearImageBtn.addEventListener('click', (e) => {
-            e.stopPropagation(); // Prevent triggering the upload input
-            processMainImageFile(null); // Reuse the logic for clearing
-            imageUploadInput.value = ''; // Reset input
+            e.stopPropagation(); 
+            processMainImageFile(null); 
+            imageUploadInput.value = ''; 
         });
     }
 
-    // Allow clicking container to trigger file input
     imagePreviewContainer.addEventListener('click', (e) => {
-        // Only trigger upload if not in a mode that uses canvas interaction and not clicking the clear button
         if (currentMode !== 'inpaint' && !isPlacingLight && e.target !== maskCanvas && e.target !== lightingOverlayCanvas && e.target !== clearImageBtn) {
             imageUploadInput.click();
         }
@@ -1604,23 +1605,25 @@ if (appContainer) {
         }
     });
 
-    // Drag and Drop listeners for main image 
     imagePreviewContainer.addEventListener('dragover', handleDragOver);
     imagePreviewContainer.addEventListener('dragleave', handleDragLeave);
     imagePreviewContainer.addEventListener('drop', handleDrop);
     
-    // Drag and Drop listeners for reference images
     referenceUploadArea.addEventListener('dragover', handleReferenceDragOver);
     referenceUploadArea.addEventListener('dragleave', handleReferenceDragLeave);
     referenceUploadArea.addEventListener('drop', handleReferenceDrop);
 
-    // Paste listener
     window.addEventListener('paste', handlePaste);
 
-    // Mode Tabs logic
     modeTabs.addEventListener('click', (e) => {
       const target = e.target as HTMLElement;
       if (target.matches('.tab-btn')) {
+        
+        // Save the current prompt before switching modes
+        if (promptInput) {
+            modePrompts[currentMode] = promptInput.value;
+        }
+
         const mode = target.dataset.mode || 'character';
         currentMode = mode;
         
@@ -1634,12 +1637,12 @@ if (appContainer) {
         const isCharacter = mode === 'character';
         const isInpaint = mode === 'inpaint';
         const isMatch3 = mode === 'match3';
+        const isSketch = mode === 'sketch';
         const isFree = mode === 'free';
         const isFQA = mode === 'fqa';
         const isAnalyzeMode = mode === 'analyze';
         const isLighting = mode === 'lighting';
 
-        // --- Core UI Visibility for FQA vs. other modes ---
         if (isFQA) {
           mainImageUploadContainer.classList.add('hidden');
           promptInputContainer.classList.add('hidden');
@@ -1665,13 +1668,12 @@ if (appContainer) {
           lightingControlsContainer?.classList.add('hidden');
           imageOverlayControls?.classList.add('hidden');
 
-        } else { // All other (non-FQA) modes
+        } else { 
             mainImageUploadContainer.classList.remove('hidden');
             promptInputContainer.classList.remove('hidden');
             resultContainer.classList.remove('hidden');
             fqaContentContainer.classList.add('hidden');
             
-            // Default visibility states
             let showPresets = isCharacter;
             let showMatch3Presets = isMatch3;
             let showInpaintControls = isInpaint;
@@ -1682,7 +1684,10 @@ if (appContainer) {
             let showGenCount = true;
             let showLightingControls = isLighting;
             let showPromptInput = true;
-            let showOverlayControls = isLighting;
+            
+            // Show overlay controls for any mode that supports comparison (if image is loaded) OR lighting
+            const supportsComparison = ['character', 'sketch', 'inpaint', 'match3', 'lighting'].includes(mode);
+            let showOverlayControls = supportsComparison;
 
 
             if (isAnalyzeMode) {
@@ -1708,7 +1713,6 @@ if (appContainer) {
                 toggleComparisonBtn.disabled = !comparisonAfterImage.src;
             }
 
-            // Apply visibility states
             presetButtonsContainer.classList.toggle('hidden', !showPresets);
             match3PresetButtonsContainer?.classList.toggle('hidden', !showMatch3Presets);
             inpaintControls?.classList.toggle('hidden', !showInpaintControls);
@@ -1721,13 +1725,18 @@ if (appContainer) {
             promptInputWrapper?.classList.toggle('hidden', !showPromptInput);
             imageOverlayControls.classList.toggle('hidden', !showOverlayControls);
 
+            // Toggle specific tools inside the overlay
+            if (lightPlacementTool) {
+                lightPlacementTool.classList.toggle('hidden', !isLighting);
+            }
+            if (overlayDivider) {
+                overlayDivider.classList.toggle('hidden', !isLighting);
+            }
             
-            // Special handling for main image preview
             const hideImagePreviewForFreeMode = isFree;
             imagePreviewContainer.classList.toggle('hidden', hideImagePreviewForFreeMode);
             imagePreviewContainer.classList.toggle('inpaint-active', isInpaint);
             
-            // Always reset lighting state on mode change
             imagePreviewContainer.classList.remove('light-placement-active');
             isPlacingLight = false;
             if (toggleLightPlacementBtn && lightProperties) {
@@ -1740,16 +1749,19 @@ if (appContainer) {
                 brushCursor.classList.add('hidden');
             }
             
-            // If switching to a mode that doesn't use reference images, clear them
             if (!showReferenceUpload) {
                 referenceImages = [];
                 renderReferenceImages();
             }
 
-            // Analyze image if switching to lighting mode with an image already loaded
             if (isLighting && uploadedImage) {
                 analyzeAndSetTemperature(uploadedImage);
             }
+        }
+        
+        // Restore the prompt for the new mode
+        if (promptInput) {
+            promptInput.value = modePrompts[currentMode] || '';
         }
 
         updateReferenceUploadLabel();
@@ -1759,7 +1771,6 @@ if (appContainer) {
       }
     });
 
-    // Inpaint Controls Listeners
     if (brushSizeSlider && brushModeBtn && eraserModeBtn && undoMaskBtn && clearMaskBtn && removeMaskBtn) {
         brushSizeSlider.addEventListener('input', () => {
             if (maskCtx) maskCtx.lineWidth = parseInt(brushSizeSlider.value, 10);
@@ -1792,7 +1803,6 @@ if (appContainer) {
         });
     }
 
-    // A helper function to set up preset buttons to avoid repetition
     const setupPresetButton = (id: string, text: string) => {
       const button = appContainer.querySelector<HTMLButtonElement>(`#${id}`);
       if (button) {
@@ -1805,7 +1815,6 @@ if (appContainer) {
       }
     };
     
-    // Preset button listeners
     setupPresetButton('preset-turn-side', 'Измени вид сбоку');
     setupPresetButton('preset-turn-34', 'Измени вид в 3/4');
     setupPresetButton('preset-turn-back', 'Измени вид со спины');
@@ -1832,7 +1841,6 @@ if (appContainer) {
     setupPresetButton('preset-turn-360', 'покажи как персонаж в этой позе будет выглядеть во всех следующих положениях: сбоку поворот влево, в 3/4, сзади, сбоку поворот вправо. Добавь произвольно еще 2 ракурса. сгенерируй это отдельными изображениями');
     setupPresetButton('preset-head-turns', 'покажи поворот головы во всех слудующих положениях: сбоку поворот влево, в 3/4, сзади, сбоку поворот вправо. Добавь произвольно еще 2 ракурса, 3/4 смотрит вверх, 3/4 смотрит вниз, смотрит вверх, смотрит вниз. сгенерируй это отдельными изображениями');
     
-    // Single Image Modal listeners
     if (fullscreenModal && closeModalBtn && prevImageBtn && nextImageBtn) {
         closeModalBtn.addEventListener('click', closeModal);
         prevImageBtn.addEventListener('click', showPrevImage);
@@ -1843,32 +1851,53 @@ if (appContainer) {
                 closeModal();
             }
         });
+
+        if (copyModalBtn) {
+            copyModalBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                if (currentGallery.length > 0 && currentImageIndex >= 0) {
+                    const success = await copyImageToClipboard(currentGallery[currentImageIndex]);
+                    if (success) {
+                         copyModalBtn.classList.add('success');
+                         setTimeout(() => copyModalBtn.classList.remove('success'), 500);
+                    }
+                }
+            });
+        }
     }
 
-    // Gallery Modal Listeners
     if (galleryModal && closeGalleryBtn && galleryBtn && downloadSelectedBtn) {
       galleryBtn.addEventListener('click', openGalleryModal);
       closeGalleryBtn.addEventListener('click', closeGalleryModal);
       downloadSelectedBtn.addEventListener('click', handleDownloadSelected);
       galleryModal.addEventListener('click', (e) => {
-          // Close if clicking on the backdrop, not the content
           if (e.target === galleryModal) {
               closeGalleryModal();
           }
       });
     }
 
-    // Global keydown listener for all modals
-    window.addEventListener('keydown', (e) => {
-        // If single image view is open, its controls take priority
+    window.addEventListener('keydown', async (e) => {
+        // Fullscreen Modal Shortcuts
         if (fullscreenModal && !fullscreenModal.classList.contains('modal-hidden')) {
              if (e.key === 'Escape') closeModal();
              if (e.key === 'ArrowLeft') showPrevImage();
              if (e.key === 'ArrowRight') showNextImage();
-             return; // Stop further processing
+             
+             // Ctrl+C or Cmd+C to copy
+             if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+                 e.preventDefault(); // Prevent default copy event
+                 if (currentGallery.length > 0 && currentImageIndex >= 0) {
+                    const success = await copyImageToClipboard(currentGallery[currentImageIndex]);
+                    if (success && copyModalBtn) {
+                        copyModalBtn.classList.add('success');
+                        setTimeout(() => copyModalBtn.classList.remove('success'), 500);
+                    }
+                 }
+             }
+             return; 
         }
         
-        // Else, if gallery is open, handle its close event
         if (galleryModal && !galleryModal.classList.contains('modal-hidden')) {
             if (e.key === 'Escape') closeGalleryModal();
         }
@@ -1878,8 +1907,6 @@ if (appContainer) {
     setGalleryMessage('Your generated image will appear here.');
     renderHistory();
     
-    // Simulate a click on the default tab ('character') to initialize state correctly
-    // This ensures all initial visibilities are set as if the user clicked the 'character' tab.
     const defaultTabButton = appContainer.querySelector<HTMLButtonElement>('#tab-character');
     if (defaultTabButton) {
         defaultTabButton.click();
