@@ -578,7 +578,7 @@ if (appContainer) {
 
       // --- Determine Model and API based on Mode and Input ---
       if (currentMode === 'lighting') {
-          currentModelName = 'gemini-2.5-flash-image';
+          currentModelName = 'gemini-3-pro-image-preview';
           generationAPI = 'generateContent';
           
           if (referenceImages.length > 0 && uploadedImage) {
@@ -705,7 +705,7 @@ if (appContainer) {
           
           if (referenceImages.length > 0) {
               // Free mode with references (Text + Images).
-              currentModelName = 'gemini-2.5-flash-image'; 
+              currentModelName = 'gemini-3-pro-image-preview'; 
               generationAPI = 'generateContent';
               const allParts: (object)[] = [];
               const referenceImageParts = referenceImages.map(refImg => ({
@@ -738,7 +738,7 @@ if (appContainer) {
           }
       } else {
           // All other modes (Character, Match3, Inpaint, Sketch)
-          currentModelName = 'gemini-2.5-flash-image'; 
+          currentModelName = 'gemini-3-pro-image-preview'; 
           generationAPI = 'generateContent';
           const allParts: (object)[] = [];
 
