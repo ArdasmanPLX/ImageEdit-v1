@@ -1,4 +1,3 @@
-
 /**
  * @license
  * Copyright 2025 Google LLC
@@ -66,6 +65,7 @@ if (appContainer) {
   const lightSizeSlider = appContainer.querySelector<HTMLInputElement>('#light-size-slider');
   const lightShapeSelector = appContainer.querySelector<HTMLDivElement>('#light-shape-selector');
   const clearLightSourcesBtn = appContainer.querySelector<HTMLButtonElement>('#clear-light-sources-btn');
+  const resetLightColorBtn = appContainer.querySelector<HTMLButtonElement>('#reset-light-color-btn'); // NEW
   const comparisonAfterContainer = appContainer.querySelector<HTMLDivElement>('#comparison-after-container');
   const comparisonAfterImage = appContainer.querySelector<HTMLImageElement>('#comparison-after-image');
   const comparisonSliderHandle = appContainer.querySelector<HTMLDivElement>('#comparison-slider-handle');
@@ -870,6 +870,7 @@ if (appContainer) {
                               const imagePartFound = response.candidates[0].content.parts.find(part => part.inlineData);
                               if (imagePartFound && imagePartFound.inlineData) {
                                   if (resultImages.length < activeGenCount) {
+                                     // Standard logic: Push image as is (API returns JPEG usually)
                                      resultImages.push({
                                           mimeType: imagePartFound.inlineData.mimeType,
                                           data: imagePartFound.inlineData.data,
@@ -1503,14 +1504,30 @@ if (appContainer) {
         }
     });
     
+    if (resetLightColorBtn && lightColorPicker) {
+        resetLightColorBtn.addEventListener('click', () => {
+            lightColorPicker.value = '#FFFFFF';
+        });
+    }
+    
     clearLightSourcesBtn.addEventListener('click', clearLightMarkers);
     
     lightingPresetButtons.forEach(button => {
         button.addEventListener('click', () => {
             if (!uploadedImage || !promptInput) return;
             const prompt = button.dataset.prompt;
+            
+            // NEW: Get current color value to inject into prompt
+            const colorValue = lightColorPicker?.value || '#FFFFFF';
+
             if (prompt) {
-                promptInput.value = prompt;
+                let finalPrompt = prompt;
+                // If a specific color is selected (not white), append it to the preset
+                if (colorValue.toUpperCase() !== '#FFFFFF') {
+                    finalPrompt = `${prompt}, colored ${colorValue}`;
+                }
+
+                promptInput.value = finalPrompt;
                 handleGenerateClick(); 
             }
         });
@@ -1831,7 +1848,7 @@ if (appContainer) {
     setupPresetButton('preset-shine-20', 'Добавь пластикового блеска на 20%. Представь шкалу пластика как 100% и добавь 20% блеска');
     setupPresetButton('preset-shine-25', 'Добавь пластикового блеска на 25%. Представь шкалу пластика как 100% и добавь 25% блеска');
     setupPresetButton('preset-shine-30', 'Добавь пластикового блеска на 30%. Представь шкалу пластика как 100% и добавь 30% блеска');
-    setupPresetButton('preset-remove-bg', 'Удалить фон. Верни изображение в формате PNG с прозрачным фоном.');
+    // Removed background removal preset
     setupPresetButton('preset-metal-30', 'Добавь эффекта метала на 30%. Представь шкалу метала как 100% и добавь 30% эффекта');
     setupPresetButton('preset-metal-40', 'Добавь эффекта метала на 40%. Представь шкалу метала как 100% и добавь 40% эффекта');
     setupPresetButton('preset-metal-50', 'Добавь эффекта метала на 50%. Представь шкалу метала как 100% и добавь 50% эффекта');

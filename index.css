@@ -1,8 +1,5 @@
 
 
-
-
-
 body {
   font-family: 'Segoe UI', 'Roboto', sans-serif;
   margin: 0;
@@ -448,6 +445,26 @@ textarea#prompt-input:focus, textarea#negative-prompt-input:focus {
     border: none;
 }
 
+.icon-btn {
+    background: none;
+    border: 1px solid #444;
+    color: #888;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    height: 24px;
+    width: 24px;
+}
+
+.icon-btn:hover {
+    color: #fff;
+    background-color: rgba(255, 255, 255, 0.1);
+    border-color: #666;
+}
 
 #lighting-controls-container fieldset {
     border: 1px solid #333;
