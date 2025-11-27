@@ -72,21 +72,8 @@ if (appContainer) {
   const generationModelSelector = appContainer.querySelector<HTMLDivElement>('#generation-model-selector');
   const modelButtons = appContainer.querySelectorAll<HTMLButtonElement>('.model-btn');
 
-  // Upscale elements
-  const upscaleBtn = document.createElement('button');
-  upscaleBtn.id = 'upscale-btn';
-  upscaleBtn.className = 'action-btn upscale';
-  upscaleBtn.ariaLabel = 'Upscale to 2K';
-  upscaleBtn.innerHTML = `
-      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="17 11 12 6 7 11"></polyline>
-          <line x1="12" y1="18" x2="12" y2="6"></line>
-      </svg>
-  `;
-  upscaleBtn.style.right = '5rem'; // Position to left of copy button
+  // Fullscreen Modal
   const fullscreenModal = document.querySelector<HTMLDivElement>('#fullscreen-modal');
-  if (fullscreenModal) fullscreenModal.appendChild(upscaleBtn);
-
 
   // Lighting elements
   const imageViewport = appContainer.querySelector<HTMLDivElement>('#image-viewport');
@@ -1040,63 +1027,6 @@ if (appContainer) {
       updateButtonState();
     }
   };
-
-  const handleUpscale = async () => {
-      if (currentGallery.length === 0 || currentImageIndex < 0) return;
-      
-      const sourceImage = currentGallery[currentImageIndex];
-      const upscaleBtnIcon = upscaleBtn.innerHTML;
-      upscaleBtn.innerHTML = '...';
-      upscaleBtn.disabled = true;
-
-      try {
-          const aspectRatio = await getSourceAspectRatio(sourceImage);
-          const response = await ai.models.generateContent({
-              model: 'gemini-3-pro-image-preview',
-              contents: {
-                  parts: [
-                      { inlineData: { data: sourceImage.data, mimeType: sourceImage.mimeType } },
-                      { text: "Upscale this image to 2K resolution. Maintain the exact composition, details, and style. Only increase the fidelity and texture quality." }
-                  ]
-              },
-              config: {
-                  responseModalities: [Modality.IMAGE],
-                  imageConfig: { 
-                      imageSize: '2K',
-                      aspectRatio: aspectRatio 
-                  }
-              }
-          });
-          
-          const imagePartFound = response.candidates?.[0]?.content.parts.find(part => part.inlineData);
-          if (imagePartFound?.inlineData) {
-              const newImagePart = {
-                  mimeType: imagePartFound.inlineData.mimeType,
-                  data: imagePartFound.inlineData.data
-              };
-              
-              // Add to history and display
-              history.push(newImagePart);
-              renderHistory();
-              
-              // Switch modal to new image
-              openModal([newImagePart], 0);
-          } else {
-              alert('Upscale failed to return an image.');
-          }
-
-      } catch (e) {
-          console.error('Upscale error:', e);
-          alert('Upscale failed. See console.');
-      } finally {
-          upscaleBtn.innerHTML = upscaleBtnIcon;
-          upscaleBtn.disabled = false;
-      }
-  };
-
-  if (upscaleBtn) {
-      upscaleBtn.addEventListener('click', handleUpscale);
-  }
   
   // --- EVENT HANDLERS ---
 
