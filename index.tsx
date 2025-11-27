@@ -9,7 +9,13 @@ import JSZip from 'jszip';
 
 type ImagePart = { mimeType: string; data: string; };
 type ReferenceImage = ImagePart & { id: number; };
-type LightMarker = { x: number; y: number; size: number; shape: 'circle' | 'cone'; rotation: number; };
+type LightMarker = {
+    shape: 'circle' | 'arrow';
+    x: number;
+    y: number;
+    path?: {x: number, y: number}[]; // For arrow drawing
+    size?: number; // Kept for circle sizing if needed
+};
 
 
 // Use a CSS selector to tell the extension which element to use for the image editor
@@ -38,17 +44,49 @@ if (appContainer) {
   const presetButtonsContainer = appContainer.querySelector<HTMLDivElement>('#preset-buttons');
   const match3PresetButtonsContainer = appContainer.querySelector<HTMLDivElement>('#match3-preset-buttons');
   const resultContainer = appContainer.querySelector<HTMLDivElement>('#result-container');
-  const mainImageUploadContainer = appContainer.querySelector<HTMLDivElement>('#image-upload-container'); // Re-introduced
-  const promptInputContainer = appContainer.querySelector<HTMLDivElement>('#prompt-container'); // Get reference to prompt container
-  const fqaContentContainer = appContainer.querySelector<HTMLDivElement>('#fqa-content-container'); // New FQA container
-  const negativePromptContainer = appContainer.querySelector<HTMLDivElement>('#negative-prompt-container'); // Container for negative prompt
-  const creativitySliderContainer = appContainer.querySelector<HTMLDivElement>('#creativity-slider-container'); // Container for creativity slider
-  const generationCountSelector = appContainer.querySelector<HTMLDivElement>('#generation-count-selector'); // Container for generation count
-  const clearImageBtn = appContainer.querySelector<HTMLButtonElement>('#clear-image-btn'); // NEW: Clear image button
+  const mainImageUploadContainer = appContainer.querySelector<HTMLDivElement>('#image-upload-container'); 
+  const promptInputContainer = appContainer.querySelector<HTMLDivElement>('#prompt-container'); 
+  const fqaContentContainer = appContainer.querySelector<HTMLDivElement>('#fqa-content-container');
+  const negativePromptContainer = appContainer.querySelector<HTMLDivElement>('#negative-prompt-container'); 
+  const creativitySliderContainer = appContainer.querySelector<HTMLDivElement>('#creativity-slider-container');
+  const generationCountSelector = appContainer.querySelector<HTMLDivElement>('#generation-count-selector'); 
+  const clearImageBtn = appContainer.querySelector<HTMLButtonElement>('#clear-image-btn'); 
+
+  // Concepting elements
+  const conceptingUiContainer = appContainer.querySelector<HTMLDivElement>('#concepting-ui-container');
+  const conceptThemeInput = appContainer.querySelector<HTMLInputElement>('#concept-theme-input');
+  const conceptTransformInput = appContainer.querySelector<HTMLInputElement>('#concept-transform-input');
+  const btnConceptKeepShape = appContainer.querySelector<HTMLButtonElement>('#preset-concept-keep-shape');
+  const btnConceptNewShape = appContainer.querySelector<HTMLButtonElement>('#preset-concept-new-shape');
+  const btnConceptKeepDesign = appContainer.querySelector<HTMLButtonElement>('#preset-concept-keep-design');
+  const btnConceptConvert = appContainer.querySelector<HTMLButtonElement>('#preset-concept-convert-btn');
+  const conceptCollectionTopicInput = appContainer.querySelector<HTMLInputElement>('#concept-collection-topic');
+  const btnConceptCollection = appContainer.querySelector<HTMLButtonElement>('#preset-concept-collection-btn');
+
 
   // Aspect Ratio selector elements
   const aspectRatioSelector = appContainer.querySelector<HTMLDivElement>('#aspect-ratio-selector');
   const aspectRatioButtons = appContainer.querySelectorAll<HTMLButtonElement>('.aspect-ratio-btn');
+  
+  // Model selector elements (Free mode)
+  const generationModelSelector = appContainer.querySelector<HTMLDivElement>('#generation-model-selector');
+  const modelButtons = appContainer.querySelectorAll<HTMLButtonElement>('.model-btn');
+
+  // Upscale elements
+  const upscaleBtn = document.createElement('button');
+  upscaleBtn.id = 'upscale-btn';
+  upscaleBtn.className = 'action-btn upscale';
+  upscaleBtn.ariaLabel = 'Upscale to 2K';
+  upscaleBtn.innerHTML = `
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="17 11 12 6 7 11"></polyline>
+          <line x1="12" y1="18" x2="12" y2="6"></line>
+      </svg>
+  `;
+  upscaleBtn.style.right = '5rem'; // Position to left of copy button
+  const fullscreenModal = document.querySelector<HTMLDivElement>('#fullscreen-modal');
+  if (fullscreenModal) fullscreenModal.appendChild(upscaleBtn);
+
 
   // Lighting elements
   const imageViewport = appContainer.querySelector<HTMLDivElement>('#image-viewport');
@@ -56,21 +94,28 @@ if (appContainer) {
   const lightingControlsContainer = appContainer.querySelector<HTMLDivElement>('#lighting-controls-container');
   const temperatureSlider = appContainer.querySelector<HTMLInputElement>('#temperature-slider');
   const temperatureValue = appContainer.querySelector<HTMLSpanElement>('#temperature-value');
+  const lightIntensitySlider = appContainer.querySelector<HTMLInputElement>('#light-intensity-slider');
+  const lightIntensityValue = appContainer.querySelector<HTMLSpanElement>('#light-intensity-value');
   const lightColorPicker = appContainer.querySelector<HTMLInputElement>('#light-color-picker');
   const lightingPresetButtons = appContainer.querySelectorAll<HTMLButtonElement>('.lighting-preset-btn');
   const lightingOverlayCanvas = appContainer.querySelector<HTMLCanvasElement>('#lighting-overlay-canvas');
   const toggleComparisonBtn = appContainer.querySelector<HTMLButtonElement>('#toggle-comparison-btn');
   const toggleLightPlacementBtn = appContainer.querySelector<HTMLButtonElement>('#toggle-light-placement-btn');
   const lightProperties = appContainer.querySelector<HTMLDivElement>('#light-properties');
-  const lightSizeSlider = appContainer.querySelector<HTMLInputElement>('#light-size-slider');
   const lightShapeSelector = appContainer.querySelector<HTMLDivElement>('#light-shape-selector');
   const clearLightSourcesBtn = appContainer.querySelector<HTMLButtonElement>('#clear-light-sources-btn');
-  const resetLightColorBtn = appContainer.querySelector<HTMLButtonElement>('#reset-light-color-btn'); // NEW
+  const resetLightColorBtn = appContainer.querySelector<HTMLButtonElement>('#reset-light-color-btn');
   const comparisonAfterContainer = appContainer.querySelector<HTMLDivElement>('#comparison-after-container');
   const comparisonAfterImage = appContainer.querySelector<HTMLImageElement>('#comparison-after-image');
   const comparisonSliderHandle = appContainer.querySelector<HTMLDivElement>('#comparison-slider-handle');
   const lightPlacementTool = appContainer.querySelector<HTMLDivElement>('#light-placement-tool');
   const overlayDivider = appContainer.querySelector<HTMLDivElement>('.divider');
+  
+  // New specific buttons for arrow/point lighting and reference lighting
+  const btnLightArrow = appContainer.querySelector<HTMLButtonElement>('#btn-light-arrow');
+  const btnLightPoint = appContainer.querySelector<HTMLButtonElement>('#btn-light-point');
+  const btnLightingRef = appContainer.querySelector<HTMLButtonElement>('#btn-lighting-ref'); // NEW
+  const directionToolsFieldset = appContainer.querySelector('#direction-tools-fieldset');
 
 
   // Inpainting elements
@@ -85,12 +130,11 @@ if (appContainer) {
   const brushCursor = document.querySelector<HTMLDivElement>('#brush-cursor');
 
   // Single Image Modal elements
-  const fullscreenModal = document.querySelector<HTMLDivElement>('#fullscreen-modal');
   const fullscreenImage = document.querySelector<HTMLImageElement>('#fullscreen-image');
   const closeModalBtn = document.querySelector<HTMLButtonElement>('#close-modal-btn');
   const prevImageBtn = document.querySelector<HTMLButtonElement>('#prev-image-btn');
   const nextImageBtn = document.querySelector<HTMLButtonElement>('#next-image-btn');
-  const copyModalBtn = document.querySelector<HTMLButtonElement>('#copy-modal-btn'); // NEW: Copy button
+  const copyModalBtn = document.querySelector<HTMLButtonElement>('#copy-modal-btn'); 
   
   // Gallery Modal elements
   const galleryModal = document.querySelector<HTMLDivElement>('#gallery-modal');
@@ -108,6 +152,7 @@ if (appContainer) {
   let generationCount = 1;
   let currentMode = 'character';
   let selectedAspectRatio = '1:1'; // Default aspect ratio
+  let selectedGenerationModel = 'imagen-4.0-generate-001'; // Default generation model
   let defaultPromptPlaceholder: string | null = null; // Store original placeholder
   let modePrompts: Record<string, string> = {}; // Store prompts for each mode
 
@@ -125,7 +170,7 @@ if (appContainer) {
   let isComparisonActive = false;
   let isDraggingSlider = false;
   let lightMarkers: LightMarker[] = [];
-  let draggedMarker: LightMarker | null = null;
+  let isDrawingArrow = false;
 
 
   // State for fullscreen navigation
@@ -134,7 +179,7 @@ if (appContainer) {
   // State for gallery selection
   let selectedHistoryIndices = new Set<number>();
   
-  const MAX_HISTORY_SIZE = 20; // Limit history to prevent UI clutter
+  const MAX_HISTORY_SIZE = 20; // Limit history to prevent prompt UI clutter
 
   // --- HELPER FUNCTIONS ---
 
@@ -169,7 +214,6 @@ if (appContainer) {
 
   const copyImageToClipboard = async (imagePart: ImagePart) => {
     try {
-        // 1. Create an Image element to load the data
         const img = new Image();
         img.src = `data:${imagePart.mimeType};base64,${imagePart.data}`;
         
@@ -178,8 +222,6 @@ if (appContainer) {
             img.onerror = reject;
         });
 
-        // 2. Draw to canvas to ensure we get a clean PNG Blob
-        // ClipboardItem requires specific formats, usually 'image/png'
         const canvas = document.createElement('canvas');
         canvas.width = img.naturalWidth;
         canvas.height = img.naturalHeight;
@@ -189,16 +231,9 @@ if (appContainer) {
         ctx.drawImage(img, 0, 0);
         
         const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
-        
         if (!blob) throw new Error("Failed to create blob");
 
-        // 3. Write to clipboard
-        await navigator.clipboard.write([
-            new ClipboardItem({
-                'image/png': blob
-            })
-        ]);
-        
+        await navigator.clipboard.write([new ClipboardItem({'image/png': blob})]);
         return true;
     } catch (err) {
         console.error("Failed to copy image: ", err);
@@ -206,8 +241,6 @@ if (appContainer) {
         return false;
     }
   };
-
-  // --- CANVAS HELPER FUNCTIONS (Moved up to fix hoisting) ---
 
   const updateBrushCursorSize = () => {
     if (brushCursor && brushSizeSlider) {
@@ -245,36 +278,45 @@ if (appContainer) {
     const ctx = lightingOverlayCtx;
     ctx.clearRect(0, 0, lightingOverlayCanvas.width, lightingOverlayCanvas.height);
     
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 3;
 
     lightMarkers.forEach(marker => {
-        ctx.fillStyle = 'rgba(74, 144, 226, 0.8)';
-        
-        if (marker.shape === 'cone') {
-            ctx.save();
-            ctx.translate(marker.x, marker.y);
-            ctx.rotate(marker.rotation);
-            
+        if (marker.shape === 'arrow' && marker.path && marker.path.length > 1) {
+            ctx.strokeStyle = 'rgba(255, 255, 0, 0.9)'; // Yellow for arrow
             ctx.beginPath();
-            const tipY = -marker.size * 0.75;
-            const baseY = marker.size * 0.75;
-            const baseHalfWidth = marker.size;
-            
-            ctx.moveTo(0, tipY); 
-            ctx.lineTo(-baseHalfWidth, baseY); 
-            ctx.lineTo(baseHalfWidth, baseY); 
-            ctx.closePath();
-            
-            ctx.fill();
+            ctx.moveTo(marker.path[0].x, marker.path[0].y);
+            for(let i=1; i<marker.path.length; i++){
+                ctx.lineTo(marker.path[i].x, marker.path[i].y);
+            }
             ctx.stroke();
 
-            ctx.restore();
-        } else { 
+            // Draw arrow head at the end
+            const last = marker.path[marker.path.length - 1];
+            // Simple arrow head based on last segment
+            let angle = 0;
+            if (marker.path.length > 5) {
+                const prev = marker.path[Math.max(0, marker.path.length - 5)];
+                angle = Math.atan2(last.y - prev.y, last.x - prev.x);
+            } else {
+                 const prev = marker.path[0];
+                 angle = Math.atan2(last.y - prev.y, last.x - prev.x);
+            }
+            
+            const headLen = 15;
             ctx.beginPath();
-            ctx.arc(marker.x, marker.y, marker.size, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.moveTo(last.x, last.y);
+            ctx.lineTo(last.x - headLen * Math.cos(angle - Math.PI / 6), last.y - headLen * Math.sin(angle - Math.PI / 6));
+            ctx.moveTo(last.x, last.y);
+            ctx.lineTo(last.x - headLen * Math.cos(angle + Math.PI / 6), last.y - headLen * Math.sin(angle + Math.PI / 6));
             ctx.stroke();
+
+        } else if (marker.shape === 'circle') {
+             ctx.fillStyle = 'rgba(255, 255, 255, 1.0)'; // White dot
+             ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+             ctx.beginPath();
+             ctx.arc(marker.x, marker.y, 8, 0, Math.PI * 2);
+             ctx.fill();
+             ctx.stroke();
         }
     });
   }
@@ -295,6 +337,49 @@ if (appContainer) {
         toggleComparisonBtn.disabled = true;
     }
   };
+
+  const getDirectionFromPath = (path: {x: number, y: number}[], w: number, h: number): string => {
+      if (!path || path.length < 2) return 'a specific direction';
+      const start = path[0];
+      const end = path[path.length - 1];
+      
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+
+      // Map angle to readable direction
+      if (angle > -22.5 && angle <= 22.5) return 'from the left towards the right';
+      else if (angle > 22.5 && angle <= 67.5) return 'from the top-left towards the bottom-right';
+      else if (angle > 67.5 && angle <= 112.5) return 'from the top towards the bottom';
+      else if (angle > 112.5 && angle <= 157.5) return 'from the top-right towards the bottom-left';
+      else if (angle > 157.5 || angle <= -157.5) return 'from the right towards the left';
+      else if (angle > -157.5 && angle <= -112.5) return 'from the bottom-right towards the top-left';
+      else if (angle > -112.5 && angle <= -67.5) return 'from the bottom towards the top';
+      else if (angle > -67.5 && angle <= -22.5) return 'from the bottom-left towards the top-right';
+
+      return 'a specific direction';
+  }
+
+  const getPositionFromPoint = (x: number, y: number, w: number, h: number): string => {
+      const col = x < w / 3 ? 'left' : (x > w * 2 / 3 ? 'right' : 'center');
+      const row = y < h / 3 ? 'top' : (y > h * 2 / 3 ? 'bottom' : 'middle');
+      
+      if (col === 'center' && row === 'middle') return 'center';
+      if (col === 'center') return `${row}-center`;
+      if (row === 'middle') return `${col}-middle`;
+      return `${row}-${col}`;
+  }
+  
+  const getDimensionsFromRatio = (ratioStr: string): { width: number, height: number } => {
+    switch (ratioStr) {
+        case '16:9': return { width: 1536, height: 864 };
+        case '9:16': return { width: 864, height: 1536 };
+        case '4:3': return { width: 1280, height: 960 };
+        case '3:4': return { width: 960, height: 1280 };
+        case '1:1': default: return { width: 1024, height: 1024 };
+    }
+  };
+
 
   // --- UI LOGIC ---
 
@@ -318,10 +403,10 @@ if (appContainer) {
         generateBtn.disabled = !isImageLoaded;
         generateBtn.textContent = 'Применить освещение';
       } else if (currentMode === 'free') {
-        generateBtn.disabled = !isPromptFilled; // Prompt is sufficient in free mode
+        generateBtn.disabled = !isPromptFilled; 
         generateBtn.textContent = 'Generate';
       } else if (currentMode === 'analyze') {
-        generateBtn.disabled = !isImageLoaded || !isPromptFilled; // Both image and prompt needed for analysis
+        generateBtn.disabled = !isImageLoaded || !isPromptFilled; 
         generateBtn.textContent = 'Анализировать изображение';
       } else {
         generateBtn.disabled = !isImageLoaded || !isPromptFilled;
@@ -331,14 +416,24 @@ if (appContainer) {
     
     const allPresetButtons = appContainer.querySelectorAll<HTMLButtonElement>('.preset-btn, .lighting-preset-btn');
     allPresetButtons.forEach(btn => {
-        btn.disabled = !isImageLoaded;
+        // Exclude Collection Button from this global disable logic, handle separately
+        if (btn.id !== 'preset-concept-collection-btn') {
+            btn.disabled = !isImageLoaded;
+        }
     });
 
-    if (currentMode === 'character' || currentMode === 'match3' || currentMode === 'inpaint' || currentMode === 'sketch') {
-      const regularPresets = appContainer.querySelectorAll<HTMLButtonElement>('.preset-btn');
-      regularPresets.forEach(btn => {
-        btn.disabled = !isImageLoaded;
-      });
+    // Special case for Concepting Convert button - enable if input has text and image is loaded
+    if (currentMode === 'concepting') {
+         if (btnConceptConvert && conceptTransformInput) {
+            btnConceptConvert.disabled = !isImageLoaded || !conceptTransformInput.value.trim();
+         }
+         if (btnConceptCollection && conceptCollectionTopicInput) {
+             // Collection needs multiple references (>=1 at least) OR main image and a topic
+             const hasRefs = referenceImages.length > 0;
+             const hasMainImage = !!uploadedImage;
+             const hasTopic = !!conceptCollectionTopicInput.value.trim();
+             btnConceptCollection.disabled = !(hasRefs || hasMainImage) || !hasTopic;
+         }
     }
   };
 
@@ -361,6 +456,8 @@ if (appContainer) {
       labelSpan.textContent = 'Upload reference (optional, for lighting style)';
     } else if (currentMode === 'free') {
       labelSpan.textContent = 'Upload reference images (style/structure)';
+    } else if (currentMode === 'concepting') {
+       labelSpan.textContent = 'Upload multiple reference images (Multiple Choice)';
     } else {
       labelSpan.textContent = 'Upload reference images';
     }
@@ -382,6 +479,9 @@ if (appContainer) {
       case 'analyze':
         promptInput.placeholder = 'Ask a question about the image...';
         break;
+      case 'concepting':
+        promptInput.placeholder = 'Describe variations or transformations...';
+        break;
       default:
         promptInput.placeholder = defaultPromptPlaceholder || 'Describe your request...';
     }
@@ -390,7 +490,6 @@ if (appContainer) {
   const analyzeAndSetTemperature = async (imagePart: ImagePart) => {
     if (!temperatureSlider || !temperatureValue) return;
 
-    // Set loading state
     temperatureSlider.disabled = true;
     temperatureValue.textContent = '...';
 
@@ -403,9 +502,7 @@ if (appContainer) {
                     { text: 'Analyze the color temperature of this image. Respond with a single integer representing the Kelvin value, between 1000 and 10000. For example, a warm, candle-lit photo would be around 2000, and a cool, blue sky would be around 10000. Respond with ONLY the integer number and nothing else.' }
                 ]
             },
-            config: {
-                temperature: 0, 
-            }
+            config: { temperature: 0 }
         });
 
         const tempStr = response.text.trim();
@@ -416,7 +513,6 @@ if (appContainer) {
             temperatureSlider.value = String(tempNum);
             temperatureValue.textContent = String(tempNum);
         } else {
-            console.warn('Failed to parse temperature from model, defaulting to 5000K.', tempStr);
             temperatureSlider.value = '5000';
             temperatureValue.textContent = '5000';
         }
@@ -436,7 +532,6 @@ if (appContainer) {
       
       imagePreview.onload = () => {
         imagePreviewContainer.style.aspectRatio = `${imagePreview.naturalWidth} / ${imagePreview.naturalHeight}`;
-        // The ResizeObserver will handle the canvas resize
       };
 
       imagePreview.src = `data:${imagePart.mimeType};base64,${imagePart.data}`;
@@ -483,7 +578,6 @@ if (appContainer) {
         const removeBtn = document.createElement('button');
         removeBtn.className = 'remove-ref-btn';
         removeBtn.textContent = '×';
-        removeBtn.ariaLabel = 'Remove reference image';
         removeBtn.onclick = () => {
             referenceImages = referenceImages.filter(ref => ref.id !== newRefImage.id);
             renderReferenceImages(); 
@@ -510,11 +604,10 @@ if (appContainer) {
               canvas.width = targetWidth;
               canvas.height = targetHeight;
               const ctx = canvas.getContext('2d');
-              if (!ctx) {
-                  return reject(new Error('Could not get canvas context'));
-              }
+              if (!ctx) return reject(new Error('Could not get canvas context'));
 
-              ctx.fillStyle = '#808080'; 
+              // Using black bars for padding as requested
+              ctx.fillStyle = '#000000'; 
               ctx.fillRect(0, 0, targetWidth, targetHeight);
 
               const scale = Math.min(targetWidth / refImg.naturalWidth, targetHeight / refImg.naturalHeight);
@@ -536,14 +629,37 @@ if (appContainer) {
       });
   };
 
+  const getSourceAspectRatio = async (sourceImage: ImagePart): Promise<string | undefined> => {
+      return new Promise((resolve) => {
+          const img = new Image();
+          img.onload = () => {
+              const w = img.naturalWidth;
+              const h = img.naturalHeight;
+              const ratio = w / h;
+              // Simple mapping to closest standard ratio for API stability, or undefined to let model decide
+              if (Math.abs(ratio - 1) < 0.1) resolve('1:1');
+              else if (Math.abs(ratio - 4/3) < 0.1) resolve('4:3');
+              else if (Math.abs(ratio - 3/4) < 0.1) resolve('3:4');
+              else if (Math.abs(ratio - 16/9) < 0.1) resolve('16:9');
+              else if (Math.abs(ratio - 9/16) < 0.1) resolve('9:16');
+              else resolve(undefined);
+          };
+          img.onerror = () => resolve(undefined);
+          img.src = `data:${sourceImage.mimeType};base64,${sourceImage.data}`;
+      });
+  }
+
   // --- MAIN LOGIC ---
 
   const handleGenerateClick = async () => {
-    if (!generateBtn || !imageGallery) {
-      return;
-    }
+    if (!generateBtn || !imageGallery) return;
     
-    if ((currentMode !== 'free' || uploadedImage) && !uploadedImage) {
+    // Check main image requirement. 
+    // Free mode doesn't need main image.
+    // Concepting Collection doesn't need main image (uses refs).
+    const isConceptingCollection = currentMode === 'concepting' && (referenceImages.length > 0 || !!uploadedImage);
+    
+    if (currentMode !== 'free' && !isConceptingCollection && !uploadedImage) {
       setGalleryMessage('Please upload an image to edit.', true);
       return;
     }
@@ -576,81 +692,77 @@ if (appContainer) {
       let apiRequestPayload: any;
       let isTextOutputMode = false; 
 
-      // --- Determine Model and API based on Mode and Input ---
+      // --- NEW LOGIC: Enforce Aspect Ratio for References in ALL modes ---
+      let processedReferenceImages: ImagePart[] = referenceImages;
+
+      // 1. Determine Target Dimensions
+      let targetWidth = 1024;
+      let targetHeight = 1024;
+
+      if (uploadedImage) {
+           // Get dimensions from uploaded image for consistency in Editing modes
+           const img = new Image();
+           await new Promise((resolve) => {
+               img.onload = resolve;
+               img.src = `data:${uploadedImage.mimeType};base64,${uploadedImage.data}`;
+           });
+           targetWidth = img.naturalWidth;
+           targetHeight = img.naturalHeight;
+      } else if (currentMode === 'free' || isConceptingCollection) {
+           // Use selected aspect ratio for Free mode or Collection without main image
+           const dims = getDimensionsFromRatio(selectedAspectRatio);
+           targetWidth = dims.width;
+           targetHeight = dims.height;
+      }
+
+      // 2. Resize References
+      if (referenceImages.length > 0) {
+          try {
+              const resizePromises = referenceImages.map(refImg =>
+                  resizeRefToMatchAspectRatio(refImg, targetWidth, targetHeight)
+              );
+              processedReferenceImages = await Promise.all(resizePromises);
+          } catch (resizeError) {
+              console.error("Error resizing references:", resizeError);
+              processedReferenceImages = referenceImages; // Fallback
+          }
+      }
+      // ------------------------------------------------------------------
+
       if (currentMode === 'lighting') {
           currentModelName = 'gemini-3-pro-image-preview';
           generationAPI = 'generateContent';
           
-          if (referenceImages.length > 0 && uploadedImage) {
-              finalPrompt = "Apply the lighting style, mood, and color scheme from the second image (the reference) to the first image (the main subject). Maintain the character and pose from the first image. The first image is the primary subject, and the second is the lighting reference.";
-              apiRequestPayload = {
-                  model: currentModelName,
-                  contents: {
-                      parts: [
-                          { inlineData: { data: uploadedImage!.data, mimeType: uploadedImage!.mimeType } },
-                          { inlineData: { data: referenceImages[0].data, mimeType: referenceImages[0].mimeType } },
-                          { text: finalPrompt }
-                      ]
-                  },
-                  config: {
-                      responseModalities: [Modality.IMAGE],
-                      temperature: 0.4, 
-                  },
-              };
-          } else if (lightMarkers.length > 0 && lightingOverlayCanvas) {
-              const { width, height } = lightingOverlayCanvas;
-              const colorValue = lightColorPicker?.value || '#FFFFFF';
-
-              const angleToDirection = (angleRad: number): string => {
-                  const angleDeg = ((angleRad * 180 / Math.PI) + 360 + 90) % 360; 
-                  if (angleDeg >= 337.5 || angleDeg < 22.5) return 'top';
-                  if (angleDeg >= 22.5 && angleDeg < 67.5) return 'top-right';
-                  if (angleDeg >= 67.5 && angleDeg < 112.5) return 'right';
-                  if (angleDeg >= 112.5 && angleDeg < 157.5) return 'bottom-right';
-                  if (angleDeg >= 157.5 && angleDeg < 202.5) return 'bottom';
-                  if (angleDeg >= 202.5 && angleDeg < 247.5) return 'bottom-left';
-                  if (angleDeg >= 247.5 && angleDeg < 292.5) return 'left';
-                  if (angleDeg >= 292.5 && angleDeg < 337.5) return 'top-left';
-                  return '';
-              };
-
-              const convertCoordsToDescription = (marker: LightMarker, w: number, h: number): string => {
-                  const {x, y, size, shape, rotation} = marker;
-                  const yPos = y < h / 3 ? 'top' : (y > h * 2 / 3 ? 'bottom' : 'middle');
-                  const xPos = x < w / 3 ? 'left' : (x > w * 2 / 3 ? 'right' : 'center');
-                  const location = (yPos === 'middle' && xPos === 'center') ? 'from the center' : `from the ${yPos} ${xPos}`;
-                  
-                  const sizeDesc = size < 15 ? 'small' : (size < 35 ? 'medium' : 'large');
-                  const colorDesc = colorValue.toUpperCase() === '#FFFFFF' ? '' : `with the color ${colorValue} `;
-
-                  if (shape === 'cone') {
-                      const direction = angleToDirection(rotation);
-                      return `a ${sizeDesc} cone of light (spotlight) ${colorDesc}${location}, pointing towards the ${direction}`;
-                  } else {
-                       return `a ${sizeDesc} circular (omni-directional) light source ${colorDesc}${location}`;
-                  }
-              };
-      
-              const descriptions = lightMarkers.map(marker => convertCoordsToDescription(marker, width, height));
-              const locations = descriptions.join(' and ');
-              const placementPrompt = `Add specific light sources: ${locations}.`;
-
-              if (promptInput?.value.trim()) {
-                  finalPrompt = `${promptInput.value.trim()}. ${placementPrompt}`;
-              } else {
-                  finalPrompt = placementPrompt;
+          let intensityPrompt = "";
+          if (lightIntensitySlider) {
+              const intensity = parseInt(lightIntensitySlider.value, 10);
+              if (intensity !== 100) {
+                  const diff = Math.abs(intensity - 100);
+                  const direction = intensity > 100 ? "upward" : "downward";
+                  intensityPrompt = ` Imagine the current image as a 3D scene. Imagine the current light intensity as 100 percent in this scene. Change the light intensity in the scene by ${diff} percent in the ${direction} direction. Do not change the saturation of the image itself; only simulate the lighting model in the image.`;
               }
+          }
 
+          if (processedReferenceImages.length > 0 && uploadedImage) {
+              // Priority: Use User Input Prompt if available, otherwise default reference prompt
+              if (promptInput?.value.trim()) {
+                  finalPrompt = promptInput.value.trim();
+              } else {
+                  finalPrompt = "Apply the lighting style, mood, and color scheme from the second image (the reference) to the first image (the main subject). Maintain the character and pose from the first image. The first image is the primary subject, and the second is the lighting reference.";
+              }
+              
+              finalPrompt += intensityPrompt;
               apiRequestPayload = {
                   model: currentModelName,
                   contents: {
                       parts: [
                           { inlineData: { data: uploadedImage!.data, mimeType: uploadedImage!.mimeType } },
+                          { inlineData: { data: processedReferenceImages[0].data, mimeType: processedReferenceImages[0].mimeType } },
                           { text: finalPrompt }
                       ]
                   },
-                  config: {
-                      responseModalities: [Modality.IMAGE],
+                  config: { 
+                      responseModalities: [Modality.IMAGE], 
                       temperature: 0.4,
                   },
               };
@@ -662,6 +774,7 @@ if (appContainer) {
                 const colorValue = lightColorPicker?.value || '#FFFFFF';
                 finalPrompt = `Adjust the lighting of the image. Set the overall color temperature to approximately ${tempValue}K. If relevant, tint the primary light source with the color ${colorValue}.`;
               }
+              finalPrompt += intensityPrompt;
               apiRequestPayload = {
                   model: currentModelName,
                   contents: {
@@ -670,8 +783,8 @@ if (appContainer) {
                           { text: finalPrompt }
                       ]
                   },
-                  config: {
-                      responseModalities: [Modality.IMAGE],
+                  config: { 
+                      responseModalities: [Modality.IMAGE], 
                       temperature: 0.4,
                   },
               };
@@ -694,21 +807,17 @@ if (appContainer) {
           apiRequestPayload = {
               model: currentModelName,
               contents: { parts: allPartsForAnalyze },
-              config: {
-                  responseModalities: [Modality.TEXT], 
-                  temperature: temperature,
-              },
+              config: { responseModalities: [Modality.TEXT], temperature: temperature },
           };
       }
       else if (currentMode === 'free') {
-          // Free mode: Strictly IGNORE the main image (uploadedImage), even if it exists.
-          
+          // Free mode logic
           if (referenceImages.length > 0) {
-              // Free mode with references (Text + Images).
+             // Use Gemini 3 Pro if references are present (Variation/Editing flow)
               currentModelName = 'gemini-3-pro-image-preview'; 
               generationAPI = 'generateContent';
               const allParts: (object)[] = [];
-              const referenceImageParts = referenceImages.map(refImg => ({
+              const referenceImageParts = processedReferenceImages.map(refImg => ({
                   inlineData: { data: refImg.data, mimeType: refImg.mimeType }
               }));
               allParts.push(...referenceImageParts);
@@ -717,144 +826,125 @@ if (appContainer) {
               apiRequestPayload = {
                   model: currentModelName,
                   contents: { parts: allParts },
-                  config: {
+                  config: { 
                       responseModalities: [Modality.IMAGE], 
                       temperature: temperature,
+                      imageConfig: { aspectRatio: selectedAspectRatio }
                   },
               };
+
           } else {
-              // Free mode, no references. Pure text-to-image.
-              currentModelName = 'imagen-4.0-generate-001';
-              generationAPI = 'generateImages';
-              apiRequestPayload = {
-                  model: currentModelName,
-                  prompt: finalPrompt,
-                  config: {
-                      numberOfImages: generationCount,
-                      outputMimeType: 'image/png', // CHANGED to PNG as requested
-                      aspectRatio: selectedAspectRatio,
-                  },
-              };
+              // Standard text-to-image with Model Selection
+              if (selectedGenerationModel === 'gemini-3-pro-image-preview') {
+                  // Text-to-Image via Gemini
+                  currentModelName = 'gemini-3-pro-image-preview';
+                  generationAPI = 'generateContent';
+                   apiRequestPayload = {
+                      model: currentModelName,
+                      contents: { parts: [{ text: finalPrompt }] },
+                      config: { 
+                          responseModalities: [Modality.IMAGE], 
+                          temperature: temperature,
+                          imageConfig: { aspectRatio: selectedAspectRatio }
+                      },
+                  };
+              } else {
+                  // Text-to-Image via Imagen
+                  currentModelName = selectedGenerationModel; // 'imagen-4.0-generate-001' or 'imagen-4.0-generate-ultra'
+                  generationAPI = 'generateImages';
+                  apiRequestPayload = {
+                      model: currentModelName,
+                      prompt: finalPrompt,
+                      config: {
+                          numberOfImages: generationCount,
+                          outputMimeType: 'image/png',
+                          aspectRatio: selectedAspectRatio,
+                      },
+                  };
+              }
           }
       } else {
-          // All other modes (Character, Match3, Inpaint, Sketch)
+          // Character, Match3, Inpaint, Sketch, Concepting
           currentModelName = 'gemini-3-pro-image-preview'; 
           generationAPI = 'generateContent';
           const allParts: (object)[] = [];
 
-          // 1. Add the main image if available
           if (uploadedImage) {
               allParts.push({
                   inlineData: { data: uploadedImage.data, mimeType: uploadedImage.mimeType },
               });
           }
           
-          // 2. Add mask if in inpaint mode
           if (currentMode === 'inpaint' && maskCanvas && imagePreview && !isCanvasBlank(maskCanvas) && uploadedImage) {
               const originalWidth = imagePreview.naturalWidth;
               const originalHeight = imagePreview.naturalHeight;
-          
-              if (originalWidth > 0 && originalHeight > 0) {
-                  const displayWidth = maskCanvas.width;
-                  const displayHeight = maskCanvas.height;
-                  const displayCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
-                  
-                  if (displayCtx) {
-                      const drawnImageData = displayCtx.getImageData(0, 0, displayWidth, displayHeight);
-                      const bwMaskImageData = new ImageData(displayWidth, displayHeight);
-                      for (let i = 0; i < drawnImageData.data.length; i += 4) {
-                          const alpha = drawnImageData.data[i + 3];
-                          if (alpha > 0) {
-                              bwMaskImageData.data[i] = 255; bwMaskImageData.data[i + 1] = 255; bwMaskImageData.data[i + 2] = 255; bwMaskImageData.data[i + 3] = 255;
-                          } else {
-                              bwMaskImageData.data[i] = 0; bwMaskImageData.data[i + 1] = 0; bwMaskImageData.data[i + 2] = 0; bwMaskImageData.data[i + 3] = 255;
-                          }
-                      }
-                      
-                      const tempCanvas = document.createElement('canvas');
-                      tempCanvas.width = displayWidth;
-                      tempCanvas.height = displayHeight;
-                      tempCanvas.getContext('2d')?.putImageData(bwMaskImageData, 0, 0);
-          
-                      const finalMaskCanvas = document.createElement('canvas');
-                      finalMaskCanvas.width = originalWidth;
-                      finalMaskCanvas.height = originalHeight;
-                      const finalMaskCtx = finalMaskCanvas.getContext('2d');
-          
-                      if (finalMaskCtx) {
-                          finalMaskCtx.drawImage(tempCanvas, 0, 0, originalWidth, originalHeight);
-                          const maskDataUrl = finalMaskCanvas.toDataURL('image/png');
-                          const maskBase64 = maskDataUrl.substring(maskDataUrl.indexOf(',') + 1);
-                          allParts.push({ inlineData: { mimeType: 'image/png', data: maskBase64 } });
+              const displayWidth = maskCanvas.width;
+              const displayHeight = maskCanvas.height;
+              const displayCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
+              
+              if (displayCtx) {
+                  const drawnImageData = displayCtx.getImageData(0, 0, displayWidth, displayHeight);
+                  const bwMaskImageData = new ImageData(displayWidth, displayHeight);
+                  for (let i = 0; i < drawnImageData.data.length; i += 4) {
+                      const alpha = drawnImageData.data[i + 3];
+                      if (alpha > 0) {
+                          bwMaskImageData.data[i] = 255; bwMaskImageData.data[i + 1] = 255; bwMaskImageData.data[i + 2] = 255; bwMaskImageData.data[i + 3] = 255;
+                      } else {
+                          bwMaskImageData.data[i] = 0; bwMaskImageData.data[i + 1] = 0; bwMaskImageData.data[i + 2] = 0; bwMaskImageData.data[i + 3] = 255;
                       }
                   }
-              } else {
-                  console.warn("Could not determine original image dimensions. Mask will not be sent.");
+                  
+                  const tempCanvas = document.createElement('canvas');
+                  tempCanvas.width = displayWidth;
+                  tempCanvas.height = displayHeight;
+                  tempCanvas.getContext('2d')?.putImageData(bwMaskImageData, 0, 0);
+      
+                  const finalMaskCanvas = document.createElement('canvas');
+                  finalMaskCanvas.width = originalWidth;
+                  finalMaskCanvas.height = originalHeight;
+                  finalMaskCanvas.getContext('2d')?.drawImage(tempCanvas, 0, 0, originalWidth, originalHeight);
+                  
+                  const maskDataUrl = finalMaskCanvas.toDataURL('image/png');
+                  const maskBase64 = maskDataUrl.substring(maskDataUrl.indexOf(',') + 1);
+                  allParts.push({ inlineData: { mimeType: 'image/png', data: maskBase64 } });
               }
           }
           
-          // 3. Add reference images, pre-processing them to match the main image's aspect ratio.
-          if (currentMode !== 'inpaint' && referenceImages.length > 0 && uploadedImage) { 
-              let processedReferenceImages: ImagePart[] = referenceImages;
-              try {
-                  const mainImageDimensions = await new Promise<{width: number, height: number}>((resolve, reject) => {
-                      const img = new Image();
-                      img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
-                      img.onerror = (err) => reject(new Error('Could not load main image to get dimensions'));
-                      img.src = `data:${uploadedImage.mimeType};base64,${uploadedImage.data}`;
-                  });
-      
-                  if (mainImageDimensions.width > 0 && mainImageDimensions.height > 0) {
-                      const resizePromises = referenceImages.map(refImg => 
-                          resizeRefToMatchAspectRatio(refImg, mainImageDimensions.width, mainImageDimensions.height)
-                      );
-                      processedReferenceImages = await Promise.all(resizePromises);
-                  }
-              } catch (resizeError) {
-                  console.error("Could not resize reference images, sending originals as a fallback.", resizeError);
-                  processedReferenceImages = referenceImages;
-              }
-      
+          if (currentMode !== 'inpaint' && processedReferenceImages.length > 0) {
               const referenceImageParts = processedReferenceImages.map(refImg => ({
                   inlineData: { data: refImg.data, mimeType: refImg.mimeType }
               }));
               allParts.push(...referenceImageParts);
               
-              finalPrompt = `This is an image editing task with references. You are given a primary image to edit, and one or more reference images. **Do not edit the reference images.** Your task is to apply the requested edit to the primary image only, using the reference images for guidance. The primary image is the first one in the sequence. Preserve its aspect ratio. The user's request is: "${finalPrompt}"`;
+              if (uploadedImage) {
+                finalPrompt = `This is an image editing task with references. You are given a primary image to edit, and one or more reference images. **Do not edit the reference images.** Your task is to apply the requested edit to the primary image only, using the reference images for guidance. The user's request is: "${finalPrompt}"`;
+              }
           }
 
-          // 4. Add the text prompt
           allParts.push({ text: finalPrompt });
           
           apiRequestPayload = {
               model: currentModelName,
               contents: { parts: allParts },
-              config: {
-                  responseModalities: [Modality.IMAGE],
+              config: { 
+                  responseModalities: [Modality.IMAGE], 
                   temperature: temperature,
               },
           };
       }
 
-      // --- Execute API Call(s) ---
       const activeGenCount = (currentMode === 'analyze') ? 1 : generationCount;
       const MAX_TOTAL_ATTEMPTS = activeGenCount * 3;
       let attempts = 0;
       
       while(resultImages.length < activeGenCount && attempts < MAX_TOTAL_ATTEMPTS) {
-          if (isTextOutputMode) { 
-              generationCount = 1;
-          }
+          if (isTextOutputMode) generationCount = 1;
           const needed = activeGenCount - resultImages.length;
-          if (attempts > 0) {
-              await new Promise(resolve => setTimeout(resolve, 500));
-          }
-          console.log(`Attempting to generate ${needed} more image(s) or get text response...`);
+          if (attempts > 0) await new Promise(resolve => setTimeout(resolve, 500));
+          console.log(`Attempting to generate ${needed} more image(s)...`);
 
           if (generationAPI === 'generateContent') {
-              const generationPromises = Array(needed).fill(null).map(() =>
-                  ai.models.generateContent(apiRequestPayload)
-              );
+              const generationPromises = Array(needed).fill(null).map(() => ai.models.generateContent(apiRequestPayload));
               attempts += needed;
               const results = await Promise.allSettled(generationPromises);
               for (const result of results) {
@@ -862,74 +952,55 @@ if (appContainer) {
                       const response = result.value;
                       if (isTextOutputMode) {
                           imageGallery.innerHTML = '';
-                          const textResult = response.text;
-                          setGalleryMessage(textResult, false, true); 
+                          setGalleryMessage(response.text, false, true); 
                           break; 
                       } else {
-                          if (response.candidates && response.candidates.length > 0) {
-                              const imagePartFound = response.candidates[0].content.parts.find(part => part.inlineData);
-                              if (imagePartFound && imagePartFound.inlineData) {
-                                  if (resultImages.length < activeGenCount) {
-                                     // Standard logic: Push image as is (API returns JPEG usually)
-                                     resultImages.push({
-                                          mimeType: imagePartFound.inlineData.mimeType,
-                                          data: imagePartFound.inlineData.data,
-                                      });
-                                  }
-                              } else { console.warn('Successful response but no image data found.', response); }
-                          } else { console.warn('Received a successful response with no candidates:', response); }
+                          const imagePartFound = response.candidates?.[0]?.content.parts.find(part => part.inlineData);
+                          if (imagePartFound?.inlineData) {
+                              if (resultImages.length < activeGenCount) {
+                                  resultImages.push({
+                                      mimeType: imagePartFound.inlineData.mimeType,
+                                      data: imagePartFound.inlineData.data,
+                                  });
+                              }
+                          }
                       }
-                  } else { console.error('A generation request failed:', result.reason); }
+                  }
               }
               if (isTextOutputMode) break; 
           } else if (generationAPI === 'generateImages') {
               const imgRequestPayload = { ...apiRequestPayload, config: { ...apiRequestPayload.config, numberOfImages: needed } };
               attempts += needed; 
-
               try {
                   const response = await ai.models.generateImages(imgRequestPayload);
-                  if (response.generatedImages && response.generatedImages.length > 0) {
+                  if (response.generatedImages) {
                       for (const genImage of response.generatedImages) {
-                          if (genImage.image?.imageBytes) {
-                              if (resultImages.length < activeGenCount) {
-                                  resultImages.push({
-                                      mimeType: 'image/png', // Force PNG client side MIME if received
-                                      data: genImage.image.imageBytes,
-                                  });
-                              }
+                          if (genImage.image?.imageBytes && resultImages.length < activeGenCount) {
+                              resultImages.push({
+                                  mimeType: 'image/png',
+                                  data: genImage.image.imageBytes,
+                              });
                           }
                       }
-                  } else { console.warn('Successful generateImages response but no images found.', response); }
-              } catch (error) { console.error('A generateImages request failed:', error); }
-          }
-          if (!isTextOutputMode) {
-            setGalleryMessage(`Generating... ${resultImages.length} / ${activeGenCount} complete.`);
+                  }
+              } catch (error) { console.error('generateImages failed:', error); }
           }
       }
 
       if (resultImages.length > 0) {
         imageGallery.innerHTML = ''; 
         
-        // Check if we should enable comparison (Supported modes AND original image exists)
-        const supportsComparison = ['character', 'sketch', 'inpaint', 'match3', 'lighting'].includes(currentMode);
-
+        const supportsComparison = ['character', 'sketch', 'inpaint', 'match3', 'lighting', 'concepting'].includes(currentMode);
         if (supportsComparison && uploadedImage && comparisonAfterImage) {
             const newImagePart = resultImages[0];
             comparisonAfterImage.src = `data:${newImagePart.mimeType};base64,${newImagePart.data}`;
-            
-            if (toggleComparisonBtn) {
-                toggleComparisonBtn.disabled = false;
-            }
+            if (toggleComparisonBtn) toggleComparisonBtn.disabled = false;
         }
         
         resultImages.forEach((imagePart, index) => {
             const galleryButton = document.createElement('button');
             galleryButton.className = 'gallery-item';
-            galleryButton.setAttribute('aria-label', 'View this image fullscreen');
-            
             galleryButton.onclick = () => {
-                // Update comparison image on click if supported
-                const supportsComparison = ['character', 'sketch', 'inpaint', 'match3', 'lighting'].includes(currentMode);
                 if (supportsComparison && uploadedImage && comparisonAfterImage && toggleComparisonBtn) {
                     const clickedImage = resultImages[index];
                     comparisonAfterImage.src = `data:${clickedImage.mimeType};base64,${clickedImage.data}`;
@@ -937,38 +1008,23 @@ if (appContainer) {
                 }
                 openModal(resultImages, index);
             };
-
             const img = document.createElement('img');
             img.src = `data:${imagePart.mimeType};base64,${imagePart.data}`;
-            img.alt = prompt;
-
             galleryButton.appendChild(img);
             imageGallery.appendChild(galleryButton);
         });
         
-        if (resultImages.length < activeGenCount) {
-            const warningEl = document.createElement('p');
-            warningEl.textContent = `Could only generate ${resultImages.length} of the requested ${activeGenCount} images.`;
-            warningEl.className = 'error';
-            imageGallery.appendChild(warningEl);
-        }
-
         if (!isTextOutputMode) {
             history.push(...resultImages);
-            if (history.length > MAX_HISTORY_SIZE) {
-                history.splice(0, history.length - MAX_HISTORY_SIZE);
-            }
+            if (history.length > MAX_HISTORY_SIZE) history.splice(0, history.length - MAX_HISTORY_SIZE);
             renderHistory();
         }
-
       } else if (!isTextOutputMode) { 
-        setGalleryMessage('The model did not return any images after multiple retries. Please try a different prompt or check your connection.', true);
-      } else if (isTextOutputMode && imageGallery.innerHTML === '') { 
-        setGalleryMessage('The model did not return any analysis text. Please try again.', true, true);
+        setGalleryMessage('The model did not return any images. Please try again.', true);
       }
     } catch (error) {
-      console.error('Error generating image/text:', error);
-      setGalleryMessage('An error occurred. Please check the console for details.', true);
+      console.error('Error:', error);
+      setGalleryMessage('An error occurred. Check console.', true);
     } finally {
       if (promptInput && currentMode === 'lighting') {
           promptInput.value = ''; 
@@ -978,11 +1034,69 @@ if (appContainer) {
               toggleLightPlacementBtn.classList.remove('active');
               lightProperties.classList.add('hidden');
               imagePreviewContainer?.classList.remove('light-placement-active');
+              if (directionToolsFieldset) directionToolsFieldset.classList.add('hidden');
           }
       }
       updateButtonState();
     }
   };
+
+  const handleUpscale = async () => {
+      if (currentGallery.length === 0 || currentImageIndex < 0) return;
+      
+      const sourceImage = currentGallery[currentImageIndex];
+      const upscaleBtnIcon = upscaleBtn.innerHTML;
+      upscaleBtn.innerHTML = '...';
+      upscaleBtn.disabled = true;
+
+      try {
+          const aspectRatio = await getSourceAspectRatio(sourceImage);
+          const response = await ai.models.generateContent({
+              model: 'gemini-3-pro-image-preview',
+              contents: {
+                  parts: [
+                      { inlineData: { data: sourceImage.data, mimeType: sourceImage.mimeType } },
+                      { text: "Upscale this image to 2K resolution. Maintain the exact composition, details, and style. Only increase the fidelity and texture quality." }
+                  ]
+              },
+              config: {
+                  responseModalities: [Modality.IMAGE],
+                  imageConfig: { 
+                      imageSize: '2K',
+                      aspectRatio: aspectRatio 
+                  }
+              }
+          });
+          
+          const imagePartFound = response.candidates?.[0]?.content.parts.find(part => part.inlineData);
+          if (imagePartFound?.inlineData) {
+              const newImagePart = {
+                  mimeType: imagePartFound.inlineData.mimeType,
+                  data: imagePartFound.inlineData.data
+              };
+              
+              // Add to history and display
+              history.push(newImagePart);
+              renderHistory();
+              
+              // Switch modal to new image
+              openModal([newImagePart], 0);
+          } else {
+              alert('Upscale failed to return an image.');
+          }
+
+      } catch (e) {
+          console.error('Upscale error:', e);
+          alert('Upscale failed. See console.');
+      } finally {
+          upscaleBtn.innerHTML = upscaleBtnIcon;
+          upscaleBtn.disabled = false;
+      }
+  };
+
+  if (upscaleBtn) {
+      upscaleBtn.addEventListener('click', handleUpscale);
+  }
   
   // --- EVENT HANDLERS ---
 
@@ -1017,147 +1131,12 @@ if (appContainer) {
     updateButtonState();
   };
 
-  const handleImageUploadEvent = (event: Event) => {
-    const target = event.target as HTMLInputElement;
-    const files = target.files;
-    if (files && files.length > 0) {
-        processMainImageFile(files[0]); 
-    }
-  };
-
-  const handleReferenceUploadEvent = (event: Event) => {
-    const target = event.target as HTMLInputElement;
-    const files = target.files;
-    if (files && files.length > 0) {
-        processReferenceFiles(files);
-        target.value = ''; 
-    }
-  };
-
-  const handleDragOver = (e: DragEvent) => {
-    e.preventDefault();
-    imagePreviewContainer?.classList.add('drag-over');
-  };
-
-  const handleDragLeave = (e: DragEvent) => {
-    e.preventDefault();
-    imagePreviewContainer?.classList.remove('drag-over');
-  };
-
-  const handleDrop = async (e: DragEvent) => {
-    e.preventDefault();
-    imagePreviewContainer?.classList.remove('drag-over');
-    
-    const historyItemJson = e.dataTransfer?.getData('application/json');
-    if (historyItemJson) {
-        try {
-            const imagePart: ImagePart = JSON.parse(historyItemJson);
-            if (imagePart && typeof imagePart.mimeType === 'string' && typeof imagePart.data === 'string') {
-                const file = new File([Uint8Array.from(atob(imagePart.data), c => c.charCodeAt(0))], 'dropped_history_image.png', { type: imagePart.mimeType });
-                processMainImageFile(file);
-            }
-        } catch (err) {
-            console.error("Failed to parse dropped history item:", err);
-        }
-        return; 
-    }
-
-    const files = e.dataTransfer?.files;
-    if (files && files.length > 0) {
-        processMainImageFile(files[0]); 
-    }
-  };
-
-  const handleReferenceDragOver = (e: DragEvent) => {
-    e.preventDefault();
-    if (referenceUploadArea) {
-      referenceUploadArea.classList.add('drag-over');
-    }
-  };
-
-  const handleReferenceDragLeave = (e: DragEvent) => {
-    e.preventDefault();
-    if (referenceUploadArea) {
-      referenceUploadArea.classList.remove('drag-over');
-    }
-  };
-
-  const handleReferenceDrop = async (e: DragEvent) => {
-    e.preventDefault();
-    if (referenceUploadArea) {
-      referenceUploadArea.classList.remove('drag-over');
-    }
-    
-    const files = e.dataTransfer?.files;
-    if (files && files.length > 0) {
-        await processReferenceFiles(files);
-    }
-  };
-
-  const handlePaste = (event: ClipboardEvent) => {
-    const items = event.clipboardData?.items;
-    if (!items) return;
-
-    let pastedImageFile: File | null = null;
-    for (let i = 0; i < items.length; i++) {
-        if (items[i].type.indexOf('image') !== -1) {
-            const file = items[i].getAsFile();
-            if (file) {
-                pastedImageFile = file;
-                break; 
-            }
-        }
-    }
-    if (pastedImageFile) {
-        processMainImageFile(pastedImageFile);
-        event.preventDefault(); 
-    }
-  };
-
-  const startDrawing = (e: MouseEvent | TouchEvent) => {
-    e.preventDefault();
-    const coords = getCoords(e, maskCanvas!);
-    if (!maskCtx || !coords) return;
-    
-    saveMaskState(); 
-
-    isDrawing = true;
-    [lastX, lastY] = [coords.x, coords.y];
-
-    maskCtx.beginPath();
-    maskCtx.arc(coords.x, coords.y, maskCtx.lineWidth / 2, 0, Math.PI * 2);
-    maskCtx.fill();
-  };
-
-  const draw = (e: MouseEvent | TouchEvent) => {
-    if (!isDrawing) return;
-    e.preventDefault();
-    const coords = getCoords(e, maskCanvas!);
-    if (!maskCtx || !coords) return;
-
-    maskCtx.beginPath();
-    maskCtx.moveTo(lastX, lastY);
-    maskCtx.lineTo(coords.x, coords.y);
-    maskCtx.stroke();
-    [lastX, lastY] = [coords.x, coords.y];
-  };
-
-  const stopDrawing = () => {
-    if (isDrawing) {
-        isDrawing = false;
-        maskCtx?.beginPath(); 
-    }
-  };
-
   const setupCanvases = () => {
-    if (!maskCanvas || !imagePreview || !brushSizeSlider || !brushCursor || !lightingOverlayCanvas || !lightSizeSlider || !lightShapeSelector || !imageViewport) return;
+    if (!maskCanvas || !imagePreview || !brushSizeSlider || !brushCursor || !lightingOverlayCanvas || !lightShapeSelector || !imageViewport) return;
     maskCtx = maskCanvas.getContext('2d');
     lightingOverlayCtx = lightingOverlayCanvas.getContext('2d');
     if (!maskCtx || !lightingOverlayCtx) return;
 
-    maskCtx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
-    maskCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-    maskCtx.lineWidth = parseInt(brushSizeSlider.value, 10);
     maskCtx.lineCap = 'round';
     maskCtx.lineJoin = 'round';
     
@@ -1168,18 +1147,15 @@ if (appContainer) {
             maskCanvas.height = height;
             lightingOverlayCanvas.width = width;
             lightingOverlayCanvas.height = height;
-
             if (comparisonAfterImage) {
                 comparisonAfterImage.style.width = `${width}px`;
                 comparisonAfterImage.style.height = `${height}px`;
             }
-
             if(maskCtx) {
                 maskCtx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
                 maskCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
                 maskCtx.lineWidth = parseInt(brushSizeSlider.value, 10);
                 maskCtx.lineCap = 'round';
-                maskCtx.lineJoin = 'round';
             }
             clearMask(); 
             clearLightMarkers(); 
@@ -1188,75 +1164,91 @@ if (appContainer) {
     resizeObserver.observe(imagePreview);
 
     updateBrushCursorSize();
-    maskCanvas.addEventListener('mouseenter', () => brushCursor.classList.remove('hidden'));
-    maskCanvas.addEventListener('mouseleave', () => brushCursor.classList.add('hidden'));
     maskCanvas.addEventListener('mousemove', (e) => {
         brushCursor.style.left = `${e.clientX}px`;
         brushCursor.style.top = `${e.clientY}px`;
-        draw(e);
+        if (isDrawing) {
+            e.preventDefault();
+            const coords = getCoords(e, maskCanvas);
+            if (coords) {
+                maskCtx!.beginPath();
+                maskCtx!.moveTo(lastX, lastY);
+                maskCtx!.lineTo(coords.x, coords.y);
+                maskCtx!.stroke();
+                [lastX, lastY] = [coords.x, coords.y];
+            }
+        }
     });
 
-    maskCanvas.addEventListener('mousedown', startDrawing);
-    maskCanvas.addEventListener('mouseup', stopDrawing);
-    maskCanvas.addEventListener('mouseout', stopDrawing);
-    maskCanvas.addEventListener('touchstart', startDrawing, { passive: false });
-    maskCanvas.addEventListener('touchmove', draw, { passive: false });
-    maskCanvas.addEventListener('touchend', stopDrawing);
+    maskCanvas.addEventListener('mouseenter', () => brushCursor.classList.remove('hidden'));
+    maskCanvas.addEventListener('mouseleave', () => brushCursor.classList.add('hidden'));
 
-    saveMaskState(); 
+    maskCanvas.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        const coords = getCoords(e, maskCanvas);
+        if (!coords) return;
+        saveMaskState();
+        isDrawing = true;
+        [lastX, lastY] = [coords.x, coords.y];
+        maskCtx!.beginPath();
+        maskCtx!.arc(coords.x, coords.y, maskCtx!.lineWidth / 2, 0, Math.PI * 2);
+        maskCtx!.fill();
+    });
 
+    maskCanvas.addEventListener('mouseup', () => { isDrawing = false; maskCtx?.beginPath(); });
+    maskCanvas.addEventListener('mouseout', () => { isDrawing = false; maskCtx?.beginPath(); });
+
+    // Lighting Overlay Events
     lightingOverlayCanvas.addEventListener('mousedown', (e) => {
         if (!isPlacingLight) return;
         const coords = getCoords(e, lightingOverlayCanvas);
         if (!coords) return;
 
-        const clickedMarker = lightMarkers.find(marker => {
-             const dx = marker.x - coords.x;
-             const dy = marker.y - coords.y;
-             return marker.shape === 'cone' && (dx * dx + dy * dy) < marker.size * marker.size;
-        });
-
-        if (clickedMarker) {
-            draggedMarker = clickedMarker;
-            imageViewport.classList.add('grabbing');
+        const shape = lightShapeSelector.querySelector<HTMLInputElement>('input[name="light-shape"]:checked')?.value as 'circle' | 'arrow';
+        
+        if (shape === 'arrow') {
+            isDrawingArrow = true;
+            const newArrow: LightMarker = { shape: 'arrow', x: coords.x, y: coords.y, path: [coords] };
+            lightMarkers.push(newArrow);
+            drawLightMarkers();
         } else {
-            const size = parseInt(lightSizeSlider.value, 10);
-            const shape = lightShapeSelector.querySelector<HTMLInputElement>('input[name="light-shape"]:checked')?.value as 'circle' | 'cone';
-            lightMarkers.push({ ...coords, size, shape, rotation: 0 });
+             // Circle: Single point logic. Replace all markers.
+            lightMarkers = [{ shape: 'circle', x: coords.x, y: coords.y }];
             drawLightMarkers();
             if (clearLightSourcesBtn) clearLightSourcesBtn.classList.remove('hidden');
         }
     });
 
     lightingOverlayCanvas.addEventListener('mousemove', (e) => {
-        if (draggedMarker) {
-            const coords = getCoords(e, lightingOverlayCanvas);
-            if (coords) {
-                const dx = coords.x - draggedMarker.x;
-                const dy = coords.y - draggedMarker.y;
-                draggedMarker.rotation = Math.atan2(dy, dx) - Math.PI / 2; 
-                drawLightMarkers();
-            }
+        if (isDrawingArrow) {
+             const coords = getCoords(e, lightingOverlayCanvas);
+             if (coords) {
+                 const currentArrow = lightMarkers[lightMarkers.length - 1];
+                 if (currentArrow && currentArrow.shape === 'arrow' && currentArrow.path) {
+                     currentArrow.path.push(coords);
+                     drawLightMarkers();
+                 }
+             }
         }
     });
 
-    const stopDraggingMarker = () => {
-        draggedMarker = null;
-        imageViewport.classList.remove('grabbing');
+    const stopDrawingLight = () => {
+        if (isDrawingArrow) {
+            isDrawingArrow = false;
+            if (clearLightSourcesBtn) clearLightSourcesBtn.classList.remove('hidden');
+        }
     }
 
-    lightingOverlayCanvas.addEventListener('mouseup', stopDraggingMarker);
-    lightingOverlayCanvas.addEventListener('mouseleave', stopDraggingMarker);
+    lightingOverlayCanvas.addEventListener('mouseup', stopDrawingLight);
+    lightingOverlayCanvas.addEventListener('mouseleave', stopDrawingLight);
   };
 
   // --- MODAL & GALLERY LOGIC ---
 
   const updateModalContent = () => {
     if (!fullscreenImage || !prevImageBtn || !nextImageBtn) return;
-
     const imagePart = currentGallery[currentImageIndex];
     fullscreenImage.src = `data:${imagePart.mimeType};base64,${imagePart.data}`;
-    
     prevImageBtn.disabled = currentImageIndex === 0;
     nextImageBtn.disabled = currentImageIndex === currentGallery.length - 1;
   };
@@ -1271,9 +1263,7 @@ if (appContainer) {
   };
 
   const closeModal = () => {
-    if (fullscreenModal) {
-        fullscreenModal.classList.add('modal-hidden');
-    }
+    if (fullscreenModal) fullscreenModal.classList.add('modal-hidden');
   };
 
   const showPrevImage = () => {
@@ -1290,248 +1280,206 @@ if (appContainer) {
     }
   };
 
-  const updateDownloadButtonState = () => {
-    if (downloadSelectedBtn) {
-        const count = selectedHistoryIndices.size;
-        downloadSelectedBtn.disabled = count === 0;
-
-        if (count === 0) {
-            downloadSelectedBtn.textContent = 'Загрузить выбранное';
-        } else if (count === 1) {
-            downloadSelectedBtn.textContent = 'Загрузить 1 изображение';
-        } else {
-            downloadSelectedBtn.textContent = `Загрузить ZIP (${count} изображений)`;
-        }
-    }
-  };
-
   const handleDownloadSelected = async () => {
     if (!downloadSelectedBtn || selectedHistoryIndices.size === 0) return;
-
     const prefix = filenamePrefixInput?.value.trim() || 'image';
-    const selectedCount = selectedHistoryIndices.size;
-
     downloadSelectedBtn.disabled = true;
 
-    if (selectedCount === 1) {
+    if (selectedHistoryIndices.size === 1) {
         downloadSelectedBtn.textContent = 'Загрузка...';
         const index = selectedHistoryIndices.values().next().value;
         const imagePart = history[index];
-        const fileExtension = imagePart.mimeType.split('/')[1] || 'png';
-        const filename = `${prefix}.${fileExtension}`;
-        
         const link = document.createElement('a');
         link.href = `data:${imagePart.mimeType};base64,${imagePart.data}`;
-        link.download = filename;
-        document.body.appendChild(link);
+        link.download = `${prefix}.png`;
         link.click();
-        document.body.removeChild(link);
     } else {
         downloadSelectedBtn.textContent = 'Архивация...';
         const zip = new JSZip();
         let count = 1;
-
-        const promises = Array.from(selectedHistoryIndices).map(index => {
-            const imagePart = history[index];
-            const fileExtension = imagePart.mimeType.split('/')[1] || 'png';
-            const filename = `${prefix}_${count++}.${fileExtension}`;
-            return zip.file(filename, imagePart.data, { base64: true });
+        selectedHistoryIndices.forEach(index => {
+            zip.file(`${prefix}_${count++}.png`, history[index].data, { base64: true });
         });
-
-        await Promise.all(promises);
-
         const content = await zip.generateAsync({ type: "blob" });
-        
         const link = document.createElement('a');
         link.href = URL.createObjectURL(content);
         link.download = `${prefix}.zip`;
-        document.body.appendChild(link);
         link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(link.href);
     }
-
-    updateDownloadButtonState();
+    downloadSelectedBtn.textContent = 'Загрузить выбранное';
+    downloadSelectedBtn.disabled = false;
   };
 
   const openGalleryModal = () => {
     if (!galleryModal || !galleryGrid) return;
-    
     galleryGrid.innerHTML = ''; 
     selectedHistoryIndices.clear(); 
-    updateDownloadButtonState();
+    
+    history.forEach((imagePart, index) => {
+        const galleryItem = document.createElement('div');
+        galleryItem.className = 'gallery-grid-item';
+        galleryItem.onclick = () => {
+            if (selectedHistoryIndices.has(index)) {
+                selectedHistoryIndices.delete(index);
+                galleryItem.classList.remove('selected');
+            } else {
+                selectedHistoryIndices.add(index);
+                galleryItem.classList.add('selected');
+            }
+            downloadSelectedBtn!.disabled = selectedHistoryIndices.size === 0;
+        };
 
-    if (history.length === 0) {
-        const placeholder = document.createElement('p');
-        placeholder.className = 'placeholder';
-        placeholder.textContent = 'Your history is empty.';
-        galleryGrid.appendChild(placeholder);
-    } else {
-        history.forEach((imagePart, index) => {
-            const galleryItem = document.createElement('div');
-            galleryItem.className = 'gallery-grid-item';
-            galleryItem.setAttribute('aria-label', `Image ${index + 1} from history`);
-            galleryItem.setAttribute('role', 'button');
-            galleryItem.tabIndex = 0;
-            
-            galleryItem.onclick = () => {
-                if (selectedHistoryIndices.has(index)) {
-                    selectedHistoryIndices.delete(index);
-                    galleryItem.classList.remove('selected');
-                } else {
-                    selectedHistoryIndices.add(index);
-                    galleryItem.classList.add('selected');
-                }
-                updateDownloadButtonState();
-            };
-
-            const img = document.createElement('img');
-            img.src = `data:${imagePart.mimeType};base64,${imagePart.data}`;
-            img.alt = `Generated image ${index + 1}`;
-
-            const overlay = document.createElement('div');
-            overlay.className = 'gallery-item-overlay';
-
-            const actions = document.createElement('div');
-            actions.className = 'gallery-item-actions';
-
-            const selectCheckbox = document.createElement('div');
-            selectCheckbox.className = 'select-checkbox';
-            selectCheckbox.setAttribute('aria-label', 'Select this image');
-            
-            const viewBtn = document.createElement('button');
-            viewBtn.className = 'view-btn';
-            viewBtn.setAttribute('aria-label', 'View this image fullscreen');
-            viewBtn.onclick = (e) => {
-                e.stopPropagation(); 
-                openModal(history, index);
-            };
-            
-            actions.appendChild(selectCheckbox);
-            actions.appendChild(viewBtn);
-
-            galleryItem.appendChild(img);
-            galleryItem.appendChild(overlay);
-            galleryItem.appendChild(actions);
-            galleryGrid.appendChild(galleryItem);
-        });
-    }
-
+        const img = document.createElement('img');
+        img.src = `data:${imagePart.mimeType};base64,${imagePart.data}`;
+        galleryItem.appendChild(img);
+        galleryGrid.appendChild(galleryItem);
+    });
     galleryModal.classList.remove('modal-hidden');
-  };
-
-  const closeGalleryModal = () => {
-      if (galleryModal) {
-          galleryModal.classList.add('modal-hidden');
-      }
   };
 
   const renderHistory = () => {
     if (!historyGallery) return;
     historyGallery.innerHTML = '';
-
-    if (history.length === 0) {
-        const placeholder = document.createElement('p');
-        placeholder.className = 'placeholder';
-        placeholder.textContent = 'Generated images will appear here.';
-        historyGallery.appendChild(placeholder);
-        return;
-    }
-
-    const displayCount = 10;
-    const startIndex = Math.max(0, history.length - displayCount);
-    
+    const startIndex = Math.max(0, history.length - 10);
     for (let i = history.length - 1; i >= startIndex; i--) {
         const imagePart = history[i];
-        const originalIndex = i; 
-
         const historyItem = document.createElement('button');
         historyItem.className = 'history-item';
-        historyItem.setAttribute('aria-label', 'View this image fullscreen or drag to canvas');
-        historyItem.onclick = () => openModal(history, originalIndex);
-
+        historyItem.onclick = () => openModal(history, i);
         historyItem.draggable = true;
         historyItem.addEventListener('dragstart', (e) => {
-            try {
-                if (e.dataTransfer) {
-                    const jsonData = JSON.stringify(imagePart);
-                    e.dataTransfer.setData('application/json', jsonData);
-                    e.dataTransfer.effectAllowed = 'copy';
-                }
-            } catch (error) {
-                console.error("Failed to serialize history item for drag-and-drop:", error);
-            }
+            e.dataTransfer?.setData('application/json', JSON.stringify(imagePart));
         });
-
         const img = document.createElement('img');
         img.src = `data:${imagePart.mimeType};base64,${imagePart.data}`;
-        img.alt = 'Previously generated image';
-        img.draggable = false; 
-
         historyItem.appendChild(img);
         historyGallery.appendChild(historyItem);
     }
   }
 
 
-  // Initial state and event listeners
-  if (imageUploadInput && promptInput && generateBtn && imagePreviewContainer && modeTabs && presetButtonsContainer && resultContainer && referenceUploadInput && referenceUploadArea && aspectRatioSelector && inpaintControls && brushSizeSlider && brushModeBtn && eraserModeBtn && undoMaskBtn && clearMaskBtn && removeMaskBtn && mainImageUploadContainer && promptInputContainer && fqaContentContainer && negativePromptContainer && creativitySliderContainer && generationCountSelector && lightingControlsContainer && temperatureSlider && temperatureValue && lightColorPicker && lightingOverlayCanvas && imageViewport && imageOverlayControls && toggleComparisonBtn && toggleLightPlacementBtn && lightProperties && lightSizeSlider && lightShapeSelector && clearLightSourcesBtn && comparisonAfterContainer && comparisonAfterImage && comparisonSliderHandle) {
+  // --- INITIALIZATION ---
+  if (imageUploadInput && promptInput && generateBtn && imagePreviewContainer && modeTabs && presetButtonsContainer) {
     
-    if (promptInput) {
-        defaultPromptPlaceholder = promptInput.placeholder; 
+    if (promptInput) defaultPromptPlaceholder = promptInput.placeholder; 
+
+    imageUploadInput.addEventListener('change', (e) => {
+        const files = (e.target as HTMLInputElement).files;
+        if (files && files.length > 0) processMainImageFile(files[0]);
+    });
+    
+    referenceUploadInput.addEventListener('change', (e) => {
+        const files = (e.target as HTMLInputElement).files;
+        if (files) processReferenceFiles(files);
+        (e.target as HTMLInputElement).value = '';
+    });
+    
+    if (conceptTransformInput) {
+        conceptTransformInput.addEventListener('input', updateButtonState);
+    }
+    
+    if (conceptCollectionTopicInput) {
+        conceptCollectionTopicInput.addEventListener('input', updateButtonState);
     }
 
-    imageUploadInput.addEventListener('change', handleImageUploadEvent);
-    referenceUploadInput.addEventListener('change', handleReferenceUploadEvent);
     promptInput.addEventListener('input', updateButtonState);
     generateBtn.addEventListener('click', handleGenerateClick);
     
     temperatureSlider.addEventListener('input', () => {
-        const value = parseInt(temperatureSlider.value, 10);
-        temperatureValue.textContent = String(value);
+        temperatureValue.textContent = temperatureSlider.value;
     });
+
+    if (lightIntensitySlider && lightIntensityValue) {
+        lightIntensitySlider.addEventListener('input', () => {
+            lightIntensityValue.textContent = lightIntensitySlider.value;
+        });
+    }
 
     toggleLightPlacementBtn.addEventListener('click', () => {
         isPlacingLight = !isPlacingLight;
         toggleLightPlacementBtn.classList.toggle('active', isPlacingLight);
         lightProperties.classList.toggle('hidden', !isPlacingLight);
         imagePreviewContainer.classList.toggle('light-placement-active', isPlacingLight);
-        if (!isPlacingLight) {
-             draggedMarker = null;
-             imageViewport.classList.remove('grabbing');
-        } else {
-            clearLightSourcesBtn.classList.toggle('hidden', lightMarkers.length === 0);
+        
+        // New Logic for toggling direction tools fieldset
+        if (directionToolsFieldset) {
+            directionToolsFieldset.classList.toggle('hidden', !isPlacingLight);
         }
+
+        if (!isPlacingLight) isDrawingArrow = false;
+        else clearLightSourcesBtn.classList.toggle('hidden', lightMarkers.length === 0);
     });
     
     if (resetLightColorBtn && lightColorPicker) {
-        resetLightColorBtn.addEventListener('click', () => {
-            lightColorPicker.value = '#FFFFFF';
-        });
+        resetLightColorBtn.addEventListener('click', () => lightColorPicker.value = '#FFFFFF');
     }
     
     clearLightSourcesBtn.addEventListener('click', clearLightMarkers);
     
     lightingPresetButtons.forEach(button => {
         button.addEventListener('click', () => {
+            // New Reference Button Check
+            if (button.id === 'btn-lighting-ref') return; // Handled separately
+            if (button.id === 'btn-light-arrow') return;
+            if (button.id === 'btn-light-point') return;
+
             if (!uploadedImage || !promptInput) return;
             const prompt = button.dataset.prompt;
-            
-            // NEW: Get current color value to inject into prompt
             const colorValue = lightColorPicker?.value || '#FFFFFF';
-
             if (prompt) {
                 let finalPrompt = prompt;
-                // If a specific color is selected (not white), append it to the preset
-                if (colorValue.toUpperCase() !== '#FFFFFF') {
-                    finalPrompt = `${prompt}, colored ${colorValue}`;
-                }
-
+                if (colorValue.toUpperCase() !== '#FFFFFF') finalPrompt = `${prompt}, colored ${colorValue}`;
                 promptInput.value = finalPrompt;
                 handleGenerateClick(); 
             }
         });
     });
+
+    // Special logic for new light buttons
+    if (btnLightArrow && btnLightPoint) {
+        btnLightArrow.addEventListener('click', () => {
+            if (!uploadedImage || !promptInput || !lightingOverlayCanvas) return;
+            const arrow = lightMarkers.find(m => m.shape === 'arrow');
+            if (arrow && arrow.path) {
+                const direction = getDirectionFromPath(arrow.path, lightingOverlayCanvas.width, lightingOverlayCanvas.height);
+                const colorValue = lightColorPicker?.value || '#FFFFFF';
+                let desc = `Change the light so it looks like the light source is located as the arrow indicates. (Lighting direction: ${direction}).`;
+                if (colorValue.toUpperCase() !== '#FFFFFF') desc += ` Use ${colorValue} colored light.`;
+                promptInput.value = desc;
+                handleGenerateClick();
+            } else {
+                setGalleryMessage('Please draw an arrow first using the pencil tool in the lighting overlay.', true);
+            }
+        });
+
+        btnLightPoint.addEventListener('click', () => {
+            if (!uploadedImage || !promptInput || !lightingOverlayCanvas) return;
+            const point = lightMarkers.find(m => m.shape === 'circle');
+            if (point) {
+                 const position = getPositionFromPoint(point.x, point.y, lightingOverlayCanvas.width, lightingOverlayCanvas.height);
+                 const colorValue = lightColorPicker?.value || '#FFFFFF';
+                 let desc = `Change the light so it looks like the light source is located where the white dot is. (Light source from the ${position}).`;
+                 if (colorValue.toUpperCase() !== '#FFFFFF') desc += ` Use ${colorValue} colored light.`;
+                 promptInput.value = desc;
+                 handleGenerateClick();
+            } else {
+                setGalleryMessage('Please place a point first using the dot tool in the lighting overlay.', true);
+            }
+        });
+    }
+
+    // New Logic: Lighting via Reference
+    if (btnLightingRef) {
+        btnLightingRef.addEventListener('click', () => {
+            if (!uploadedImage || !promptInput) return;
+            if (referenceImages.length === 0) {
+                setGalleryMessage('Please upload a reference image first.', true);
+                return;
+            }
+            promptInput.value = "Use the lighting scheme and only that from the reference image - image 2, and apply it to image 1 (the main image).";
+            handleGenerateClick();
+        });
+    }
 
     toggleComparisonBtn.addEventListener('click', () => {
         if (toggleComparisonBtn.disabled) return;
@@ -1551,55 +1499,56 @@ if (appContainer) {
     };
 
     comparisonSliderHandle.addEventListener('mousedown', (e) => {
+        e.preventDefault(); // Prevent text selection
         e.stopPropagation(); 
         isDraggingSlider = true;
         imageViewport.classList.add('grabbing');
     });
 
-    comparisonSliderHandle.addEventListener('click', (e) => {
-        e.stopPropagation();
-    });
-
+    comparisonSliderHandle.addEventListener('click', (e) => e.stopPropagation());
     window.addEventListener('mouseup', () => {
         isDraggingSlider = false;
         imageViewport.classList.remove('grabbing');
     });
-    
     window.addEventListener('mousemove', (e) => {
-        if (isDraggingSlider) {
-            moveSlider(e.clientX);
-        }
+        if (isDraggingSlider) moveSlider(e.clientX);
     });
 
     if (creativitySlider && creativityValue) {
-        creativitySlider.addEventListener('input', () => {
-            creativityValue.textContent = creativitySlider.value;
-        });
+        creativitySlider.addEventListener('input', () => creativityValue.textContent = creativitySlider.value);
     }
 
     numButtons.forEach(button => {
         button.addEventListener('click', () => {
             generationCount = parseInt(button.dataset.count || '1', 10);
-            numButtons.forEach(btn => {
-                btn.classList.remove('active');
-                btn.setAttribute('aria-pressed', 'false');
-            });
+            numButtons.forEach(btn => btn.classList.remove('active'));
             button.classList.add('active');
-            button.setAttribute('aria-pressed', 'true');
         });
     });
 
     aspectRatioButtons.forEach(button => {
       button.addEventListener('click', () => {
         selectedAspectRatio = button.dataset.ratio || '1:1';
-        aspectRatioButtons.forEach(btn => {
-          btn.classList.remove('active');
-          btn.setAttribute('aria-pressed', 'false');
-        });
+        aspectRatioButtons.forEach(btn => btn.classList.remove('active'));
         button.classList.add('active');
-        button.setAttribute('aria-pressed', 'true');
       });
     });
+    
+    // Model Buttons Event Listener
+    if (modelButtons) {
+        modelButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                selectedGenerationModel = button.dataset.model || 'imagen-4.0-generate-001';
+                modelButtons.forEach(btn => {
+                    btn.classList.remove('active');
+                    btn.setAttribute('aria-pressed', 'false');
+                });
+                button.classList.add('active');
+                button.setAttribute('aria-pressed', 'true');
+            });
+        });
+    }
+
 
     if (clearImageBtn) {
         clearImageBtn.addEventListener('click', (e) => {
@@ -1614,32 +1563,55 @@ if (appContainer) {
             imageUploadInput.click();
         }
     });
-    imagePreviewContainer.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-             if (currentMode !== 'inpaint' && !isPlacingLight) {
-                imageUploadInput.click();
+
+    imagePreviewContainer.addEventListener('dragover', (e) => { e.preventDefault(); imagePreviewContainer.classList.add('drag-over'); });
+    imagePreviewContainer.addEventListener('dragleave', (e) => { e.preventDefault(); imagePreviewContainer.classList.remove('drag-over'); });
+    imagePreviewContainer.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        imagePreviewContainer.classList.remove('drag-over');
+        
+        const historyItemJson = e.dataTransfer?.getData('application/json');
+        if (historyItemJson) {
+            try {
+                const imagePart: ImagePart = JSON.parse(historyItemJson);
+                const file = new File([Uint8Array.from(atob(imagePart.data), c => c.charCodeAt(0))], 'dropped_history.png', { type: imagePart.mimeType });
+                processMainImageFile(file);
+            } catch (err) { console.error("Drop error", err); }
+            return;
+        }
+
+        const files = e.dataTransfer?.files;
+        if (files && files.length > 0) processMainImageFile(files[0]);
+    });
+    
+    referenceUploadArea.addEventListener('dragover', (e) => { e.preventDefault(); referenceUploadArea.classList.add('drag-over'); });
+    referenceUploadArea.addEventListener('dragleave', (e) => { e.preventDefault(); referenceUploadArea.classList.remove('drag-over'); });
+    referenceUploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        referenceUploadArea.classList.remove('drag-over');
+        const files = e.dataTransfer?.files;
+        if (files) processReferenceFiles(files);
+    });
+
+    window.addEventListener('paste', (event) => {
+        const items = event.clipboardData?.items;
+        if (!items) return;
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf('image') !== -1) {
+                const file = items[i].getAsFile();
+                if (file) {
+                    processMainImageFile(file);
+                    event.preventDefault(); 
+                    break;
+                }
             }
         }
     });
 
-    imagePreviewContainer.addEventListener('dragover', handleDragOver);
-    imagePreviewContainer.addEventListener('dragleave', handleDragLeave);
-    imagePreviewContainer.addEventListener('drop', handleDrop);
-    
-    referenceUploadArea.addEventListener('dragover', handleReferenceDragOver);
-    referenceUploadArea.addEventListener('dragleave', handleReferenceDragLeave);
-    referenceUploadArea.addEventListener('drop', handleReferenceDrop);
-
-    window.addEventListener('paste', handlePaste);
-
     modeTabs.addEventListener('click', (e) => {
       const target = e.target as HTMLElement;
       if (target.matches('.tab-btn')) {
-        
-        // Save the current prompt before switching modes
-        if (promptInput) {
-            modePrompts[currentMode] = promptInput.value;
-        }
+        if (promptInput) modePrompts[currentMode] = promptInput.value;
 
         const mode = target.dataset.mode || 'character';
         currentMode = mode;
@@ -1651,136 +1623,88 @@ if (appContainer) {
         target.classList.add('active');
         target.setAttribute('aria-selected', 'true');
 
-        const isCharacter = mode === 'character';
-        const isInpaint = mode === 'inpaint';
-        const isMatch3 = mode === 'match3';
-        const isSketch = mode === 'sketch';
-        const isFree = mode === 'free';
         const isFQA = mode === 'fqa';
-        const isAnalyzeMode = mode === 'analyze';
         const isLighting = mode === 'lighting';
+        const isFree = mode === 'free';
+
+        // --- Logic for Generation Count Visibility ---
+        const countBtn5 = appContainer.querySelector('.num-btn[data-count="5"]');
+        const countBtn6 = appContainer.querySelector('.num-btn[data-count="6"]');
+        if (isFree) {
+            countBtn5?.classList.add('hidden');
+            countBtn6?.classList.add('hidden');
+            if (generationCount > 4) {
+                generationCount = 4;
+                numButtons.forEach(btn => btn.classList.remove('active'));
+                appContainer.querySelector('.num-btn[data-count="4"]')?.classList.add('active');
+            }
+            if (generationModelSelector) generationModelSelector.classList.remove('hidden'); // Show Model Selector
+        } else {
+            countBtn5?.classList.remove('hidden');
+            countBtn6?.classList.remove('hidden');
+            if (generationModelSelector) generationModelSelector.classList.add('hidden'); // Hide Model Selector
+        }
+
 
         if (isFQA) {
           mainImageUploadContainer.classList.add('hidden');
           promptInputContainer.classList.add('hidden');
           resultContainer.classList.add('hidden');
           fqaContentContainer.classList.remove('hidden');
-
-          uploadedImage = null;
-          referenceImages = [];
-          processMainImageFile(null);
-          renderReferenceImages();
-          if (promptInput) promptInput.value = '';
-          
-          if (brushCursor) { brushCursor.classList.add('hidden'); }
-          referenceUploadArea.classList.add('hidden');
-          referencePreviewContainer.classList.add('hidden');
-          inpaintControls?.classList.add('hidden');
-          presetButtonsContainer.classList.add('hidden');
-          match3PresetButtonsContainer?.classList.add('hidden');
-          negativePromptContainer?.classList.add('hidden');
-          creativitySliderContainer?.classList.add('hidden');
-          generationCountSelector?.classList.add('hidden');
-          aspectRatioSelector?.classList.add('hidden');
-          lightingControlsContainer?.classList.add('hidden');
-          imageOverlayControls?.classList.add('hidden');
-
+          uploadedImage = null; referenceImages = []; processMainImageFile(null); renderReferenceImages();
         } else { 
             mainImageUploadContainer.classList.remove('hidden');
             promptInputContainer.classList.remove('hidden');
             resultContainer.classList.remove('hidden');
             fqaContentContainer.classList.add('hidden');
             
-            let showPresets = isCharacter;
-            let showMatch3Presets = isMatch3;
-            let showInpaintControls = isInpaint;
-            let showAspectRatio = isFree;
-            let showReferenceUpload = true;
-            let showNegativePrompt = true;
-            let showCreativity = true;
-            let showGenCount = true;
-            let showLightingControls = isLighting;
-            let showPromptInput = true;
-            
-            // Show overlay controls for any mode that supports comparison (if image is loaded) OR lighting
-            const supportsComparison = ['character', 'sketch', 'inpaint', 'match3', 'lighting'].includes(mode);
-            let showOverlayControls = supportsComparison;
-
-
-            if (isAnalyzeMode) {
-                showPresets = false;
-                showMatch3Presets = false;
-                showNegativePrompt = false;
-                showCreativity = false;
-                showGenCount = false;
-                showAspectRatio = false;
-                showInpaintControls = false;
-                showLightingControls = false;
-                showOverlayControls = false;
-            } else if (isLighting) {
-                showPresets = false;
-                showMatch3Presets = false;
-                showNegativePrompt = false;
-                showCreativity = false;
-                showGenCount = true; 
-                showAspectRatio = false;
-                showInpaintControls = false;
-                showReferenceUpload = true;
-                showPromptInput = true; 
-                toggleComparisonBtn.disabled = !comparisonAfterImage.src;
-            }
+            const showPresets = mode === 'character';
+            const showMatch3Presets = mode === 'match3';
+            const showConceptingUI = mode === 'concepting';
+            const showInpaintControls = mode === 'inpaint';
+            const showAspectRatio = mode === 'free';
+            const showLightingControls = isLighting;
+            const supportsComparison = ['character', 'sketch', 'inpaint', 'match3', 'lighting', 'concepting'].includes(mode);
 
             presetButtonsContainer.classList.toggle('hidden', !showPresets);
             match3PresetButtonsContainer?.classList.toggle('hidden', !showMatch3Presets);
+            if (conceptingUiContainer) conceptingUiContainer.classList.toggle('hidden', !showConceptingUI);
+            
             inpaintControls?.classList.toggle('hidden', !showInpaintControls);
             aspectRatioSelector?.classList.toggle('hidden', !showAspectRatio);
-            referenceUploadArea.classList.toggle('hidden', !showReferenceUpload);
-            negativePromptContainer?.classList.toggle('hidden', !showNegativePrompt);
-            creativitySliderContainer?.classList.toggle('hidden', !showCreativity);
-            generationCountSelector?.classList.toggle('hidden', !showGenCount);
+            
+            referenceUploadArea.classList.toggle('hidden', mode === 'analyze');
+            negativePromptContainer?.classList.toggle('hidden', mode === 'analyze' || isLighting);
+            creativitySliderContainer?.classList.toggle('hidden', mode === 'analyze' || isLighting);
+            generationCountSelector?.classList.toggle('hidden', mode === 'analyze');
             lightingControlsContainer?.classList.toggle('hidden', !showLightingControls);
-            promptInputWrapper?.classList.toggle('hidden', !showPromptInput);
-            imageOverlayControls.classList.toggle('hidden', !showOverlayControls);
-
-            // Toggle specific tools inside the overlay
-            if (lightPlacementTool) {
-                lightPlacementTool.classList.toggle('hidden', !isLighting);
-            }
-            if (overlayDivider) {
-                overlayDivider.classList.toggle('hidden', !isLighting);
-            }
+            imageOverlayControls.classList.toggle('hidden', !supportsComparison);
             
-            const hideImagePreviewForFreeMode = isFree;
-            imagePreviewContainer.classList.toggle('hidden', hideImagePreviewForFreeMode);
-            imagePreviewContainer.classList.toggle('inpaint-active', isInpaint);
+            if (lightPlacementTool) lightPlacementTool.classList.toggle('hidden', !isLighting);
+            if (overlayDivider) overlayDivider.classList.toggle('hidden', !isLighting);
             
+            imagePreviewContainer.classList.toggle('hidden', mode === 'free');
+            imagePreviewContainer.classList.toggle('inpaint-active', mode === 'inpaint');
+            
+            // Reset overlay states
             imagePreviewContainer.classList.remove('light-placement-active');
             isPlacingLight = false;
             if (toggleLightPlacementBtn && lightProperties) {
                 toggleLightPlacementBtn.classList.remove('active');
                 lightProperties.classList.add('hidden');
             }
+            // Ensure direction tools fieldset is hidden when switching modes
+            if (directionToolsFieldset) {
+                directionToolsFieldset.classList.add('hidden');
+            }
+
             hideComparisonView();
+            if (brushCursor) brushCursor.classList.add('hidden');
 
-            if (!isInpaint && brushCursor) {
-                brushCursor.classList.add('hidden');
-            }
-            
-            if (!showReferenceUpload) {
-                referenceImages = [];
-                renderReferenceImages();
-            }
-
-            if (isLighting && uploadedImage) {
-                analyzeAndSetTemperature(uploadedImage);
-            }
+            if (isLighting && uploadedImage) analyzeAndSetTemperature(uploadedImage);
         }
         
-        // Restore the prompt for the new mode
-        if (promptInput) {
-            promptInput.value = modePrompts[currentMode] || '';
-        }
-
+        if (promptInput) promptInput.value = modePrompts[currentMode] || '';
         updateReferenceUploadLabel();
         updateMainUploadLabel();
         updatePromptPlaceholder();
@@ -1831,6 +1755,63 @@ if (appContainer) {
         });
       }
     };
+
+    // Concepting preset button logic
+    const setupConceptingButton = (btn: HTMLButtonElement | null, baseText: string) => {
+        if (btn) {
+            btn.addEventListener('click', () => {
+                if (!uploadedImage || !promptInput) return;
+                const theme = conceptThemeInput ? conceptThemeInput.value.trim() : '';
+                let finalPrompt = baseText;
+                if (theme) {
+                    finalPrompt += ` In the theme of ${theme}.`;
+                }
+                promptInput.value = finalPrompt;
+                updateButtonState();
+                handleGenerateClick();
+            });
+        }
+    };
+    
+    setupConceptingButton(btnConceptKeepShape, "Please create a version of this object with a different design, but in the same art style. Keep the original shape of the object.");
+    setupConceptingButton(btnConceptNewShape, "Please create a version of this object with a different design, but in the same art style. Change the original shape of the object.");
+    setupConceptingButton(btnConceptKeepDesign, "Please create a version of this object with a different design, but in the same art style. Change the original shape of the object, but keep the visual coloring.");
+
+    if (btnConceptConvert) {
+        btnConceptConvert.addEventListener('click', () => {
+            if (!uploadedImage || !promptInput || !conceptTransformInput) return;
+            const objName = conceptTransformInput.value.trim();
+            if (objName) {
+                promptInput.value = `convert the object into a ${objName}`;
+                updateButtonState();
+                handleGenerateClick();
+            } else {
+                setGalleryMessage('Please enter an object name to transform into.', true);
+            }
+        });
+    }
+
+    // Collection button logic
+    if (btnConceptCollection) {
+        btnConceptCollection.addEventListener('click', () => {
+            if (!conceptCollectionTopicInput || !promptInput) return;
+            const topic = conceptCollectionTopicInput.value.trim();
+            if (topic) {
+                let contextStr = "";
+                if (uploadedImage && referenceImages.length > 0) {
+                    contextStr = "Analyze the main image and attached reference images";
+                } else if (uploadedImage) {
+                    contextStr = "Analyze the main image";
+                } else {
+                    contextStr = "Analyze the attached reference images";
+                }
+                promptInput.value = `Create a collection of images on the ${topic}. ${contextStr} to understand the style, composition, and visual logic of the collection, and generate a new result that fits this collection.`;
+                updateButtonState();
+                handleGenerateClick();
+            }
+        });
+    }
+
     
     setupPresetButton('preset-turn-side', 'Измени вид сбоку');
     setupPresetButton('preset-turn-34', 'Измени вид в 3/4');
@@ -1848,7 +1829,6 @@ if (appContainer) {
     setupPresetButton('preset-shine-20', 'Добавь пластикового блеска на 20%. Представь шкалу пластика как 100% и добавь 20% блеска');
     setupPresetButton('preset-shine-25', 'Добавь пластикового блеска на 25%. Представь шкалу пластика как 100% и добавь 25% блеска');
     setupPresetButton('preset-shine-30', 'Добавь пластикового блеска на 30%. Представь шкалу пластика как 100% и добавь 30% блеска');
-    // Removed background removal preset
     setupPresetButton('preset-metal-30', 'Добавь эффекта метала на 30%. Представь шкалу метала как 100% и добавь 30% эффекта');
     setupPresetButton('preset-metal-40', 'Добавь эффекта метала на 40%. Представь шкалу метала как 100% и добавь 40% эффекта');
     setupPresetButton('preset-metal-50', 'Добавь эффекта метала на 50%. Представь шкалу метала как 100% и добавь 50% эффекта');
@@ -1862,13 +1842,9 @@ if (appContainer) {
         closeModalBtn.addEventListener('click', closeModal);
         prevImageBtn.addEventListener('click', showPrevImage);
         nextImageBtn.addEventListener('click', showNextImage);
-
         fullscreenModal.addEventListener('click', (e) => {
-            if (e.target === fullscreenModal) {
-                closeModal();
-            }
+            if (e.target === fullscreenModal) closeModal();
         });
-
         if (copyModalBtn) {
             copyModalBtn.addEventListener('click', async (e) => {
                 e.stopPropagation();
@@ -1885,25 +1861,20 @@ if (appContainer) {
 
     if (galleryModal && closeGalleryBtn && galleryBtn && downloadSelectedBtn) {
       galleryBtn.addEventListener('click', openGalleryModal);
-      closeGalleryBtn.addEventListener('click', closeGalleryModal);
+      closeGalleryBtn.addEventListener('click', () => galleryModal.classList.add('modal-hidden'));
       downloadSelectedBtn.addEventListener('click', handleDownloadSelected);
       galleryModal.addEventListener('click', (e) => {
-          if (e.target === galleryModal) {
-              closeGalleryModal();
-          }
+          if (e.target === galleryModal) galleryModal.classList.add('modal-hidden');
       });
     }
 
     window.addEventListener('keydown', async (e) => {
-        // Fullscreen Modal Shortcuts
         if (fullscreenModal && !fullscreenModal.classList.contains('modal-hidden')) {
              if (e.key === 'Escape') closeModal();
              if (e.key === 'ArrowLeft') showPrevImage();
              if (e.key === 'ArrowRight') showNextImage();
-             
-             // Ctrl+C or Cmd+C to copy
              if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
-                 e.preventDefault(); // Prevent default copy event
+                 e.preventDefault(); 
                  if (currentGallery.length > 0 && currentImageIndex >= 0) {
                     const success = await copyImageToClipboard(currentGallery[currentImageIndex]);
                     if (success && copyModalBtn) {
@@ -1914,19 +1885,15 @@ if (appContainer) {
              }
              return; 
         }
-        
         if (galleryModal && !galleryModal.classList.contains('modal-hidden')) {
-            if (e.key === 'Escape') closeGalleryModal();
+            if (e.key === 'Escape') galleryModal.classList.add('modal-hidden');
         }
     });
 
     setupCanvases();
     setGalleryMessage('Your generated image will appear here.');
     renderHistory();
-    
     const defaultTabButton = appContainer.querySelector<HTMLButtonElement>('#tab-character');
-    if (defaultTabButton) {
-        defaultTabButton.click();
-    }
+    if (defaultTabButton) defaultTabButton.click();
   }
 }

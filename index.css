@@ -182,6 +182,8 @@ p {
   background-color: #2a2a2a;
   cursor: pointer;
   transition: border-color 0.2s, background-color 0.2s, aspect-ratio 0.3s;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 #image-preview-container:hover, #image-preview-container:focus-within {
@@ -199,6 +201,9 @@ p {
   max-height: 100%;
   object-fit: contain;
   display: block;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
 }
 
 #image-preview.hidden {
@@ -344,6 +349,7 @@ p {
     margin: 1.5rem auto 1.5rem auto; /* Top, Right, Bottom, Left margins */
     border-bottom: 1px solid #333;
     max-width: fit-content; /* Ensure tabs only take up necessary width */
+    flex-wrap: wrap; /* Added for more tabs */
 }
 
 .tab-btn {
@@ -482,6 +488,13 @@ textarea#prompt-input:focus, textarea#negative-prompt-input:focus {
     font-weight: bold;
 }
 
+.highlighted-panel {
+    background-color: rgba(74, 144, 226, 0.15); /* Light blue tint */
+    border-color: #4a90e2 !important;
+    transition: all 0.3s ease;
+}
+
+
 .lighting-preset-btn {
     padding: 0.5rem 1rem;
     border-radius: 6px;
@@ -512,11 +525,61 @@ textarea#prompt-input:focus, textarea#negative-prompt-input:focus {
 }
 
 
-#preset-buttons, #match3-preset-buttons {
+#preset-buttons, #match3-preset-buttons, #concepting-preset-buttons {
     display: flex;
     flex-wrap: wrap;
     gap: 0.5rem;
 }
+
+/* Concepting Inputs Styles */
+#concepting-ui-container {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.concept-input-row {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.input-group label {
+    font-size: 0.9rem;
+    color: #ccc;
+}
+
+.input-group input[type="text"] {
+    padding: 0.7rem;
+    border-radius: 6px;
+    border: 1px solid #444;
+    background-color: #2a2a2a;
+    color: #e0e0e0;
+    font-size: 0.95rem;
+}
+
+.input-group input[type="text"]:focus {
+    outline: none;
+    border-color: #4a90e2;
+}
+
+.input-btn-wrapper {
+    display: flex;
+    gap: 0.5rem;
+    width: 100%;
+}
+
+.input-btn-wrapper input {
+    flex-grow: 1;
+}
+
 
 .preset-btn {
     padding: 0.5rem 1rem;
@@ -663,7 +726,7 @@ textarea#prompt-input:focus, textarea#negative-prompt-input:focus {
     background-color: #c62828;
 }
 
-#generation-count-selector, #aspect-ratio-selector {
+#generation-count-selector, #aspect-ratio-selector, #generation-model-selector {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -671,19 +734,19 @@ textarea#prompt-input:focus, textarea#negative-prompt-input:focus {
     margin-top: 0.5rem;
 }
 
-#generation-count-selector label, #aspect-ratio-selector label {
+#generation-count-selector label, #aspect-ratio-selector label, #generation-model-selector label {
     color: #ccc;
     font-size: 0.9rem;
     flex-shrink: 0;
 }
 
-#generation-count-selector [role="group"], #aspect-ratio-selector [role="group"] {
+#generation-count-selector [role="group"], #aspect-ratio-selector [role="group"], #generation-model-selector [role="group"] {
     display: flex;
     flex-wrap: wrap; /* Allow wrapping for many buttons */
     gap: 0.5rem;
 }
 
-.num-btn, .aspect-ratio-btn {
+.num-btn, .aspect-ratio-btn, .model-btn {
     padding: 0.5rem;
     min-width: 40px;
     border-radius: 6px;
@@ -696,14 +759,14 @@ textarea#prompt-input:focus, textarea#negative-prompt-input:focus {
     text-align: center;
 }
 
-.num-btn.active, .aspect-ratio-btn.active {
+.num-btn.active, .aspect-ratio-btn.active, .model-btn.active {
     background-color: #4a90e2;
     border-color: #4a90e2;
     color: white;
     font-weight: bold;
 }
 
-.num-btn:hover:not(.active), .aspect-ratio-btn:hover:not(.active) {
+.num-btn:hover:not(.active), .aspect-ratio-btn:hover:not(.active), .model-btn:hover:not(.active) {
     background-color: #454545;
 }
 
@@ -944,6 +1007,9 @@ button#generate-btn:disabled {
     width: 100%;
     max-width: none; /* Override max-width to fill the clipped container */
     object-fit: cover;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-user-drag: none;
 }
 
 #comparison-slider-handle {
