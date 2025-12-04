@@ -7,7 +7,7 @@
 import { GoogleGenAI, Modality } from '@google/genai';
 import JSZip from 'jszip';
 
-type ImagePart = { mimeType: string; data: string; };
+type ImagePart = { mimeType: string; data: string; filename?: string; };
 type ReferenceImage = ImagePart & { id: number; };
 type LightMarker = {
     shape: 'circle' | 'arrow';
@@ -17,6 +17,12 @@ type LightMarker = {
     size?: number; // Kept for circle sizing if needed
 };
 
+// Log structure
+type PromptLog = {
+    timestamp: string;
+    mode: string;
+    prompt: string;
+};
 
 // Use a CSS selector to tell the extension which element to use for the image editor
 const appContainer = document.querySelector('.app-container');
@@ -130,6 +136,7 @@ if (appContainer) {
   const galleryBtn = appContainer.querySelector<HTMLButtonElement>('#gallery-btn');
   const filenamePrefixInput = document.querySelector<HTMLInputElement>('#filename-prefix');
   const downloadSelectedBtn = document.querySelector<HTMLButtonElement>('#download-selected-btn');
+  const downloadLogBtn = document.querySelector<HTMLButtonElement>('#download-log-btn'); // NEW
 
 
   let uploadedImage: ImagePart | null = null;
@@ -139,9 +146,10 @@ if (appContainer) {
   let generationCount = 1;
   let currentMode = 'character';
   let selectedAspectRatio = '1:1'; // Default aspect ratio
-  let selectedGenerationModel = 'imagen-4.0-generate-001'; // Default generation model
+  let selectedGenerationModel = 'gemini-2.5-flash-image'; // Default generation/editor model (Nano Banana)
   let defaultPromptPlaceholder: string | null = null; // Store original placeholder
   let modePrompts: Record<string, string> = {}; // Store prompts for each mode
+  let promptLogs: PromptLog[] = []; // Store usage logs
 
   // Inpainting state
   let maskCtx: CanvasRenderingContext2D | null = null;
@@ -169,6 +177,49 @@ if (appContainer) {
   const MAX_HISTORY_SIZE = 20; // Limit history to prevent prompt UI clutter
 
   // --- HELPER FUNCTIONS ---
+
+  const modeNames: Record<string, string> = {
+    'character': 'Персонаж',
+    'concepting': 'Концептинг',
+    'sketch': 'Свободный режим',
+    'inpaint': 'Маска',
+    'lighting': 'Освещение',
+    'match3': 'Match3',
+    'free': 'Генерация изображения',
+    'analyze': 'Анализ изображения',
+    'fqa': 'Справка'
+  };
+
+  const cyrillicToLatinMap: Record<string, string> = {
+    'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'yo', 'ж': 'zh',
+    'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm', 'н': 'n', 'о': 'o',
+    'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u', 'ф': 'f', 'х': 'kh', 'ц': 'ts',
+    'ч': 'ch', 'ш': 'sh', 'щ': 'shch', 'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu',
+    'я': 'ya'
+  };
+
+  const logPrompt = (mode: string, prompt: string) => {
+    if (!prompt) return;
+    promptLogs.push({
+        timestamp: new Date().toLocaleTimeString(),
+        mode: modeNames[mode] || mode,
+        prompt: prompt
+    });
+  };
+
+  const handleDownloadLog = () => {
+    if (promptLogs.length === 0) {
+        alert("Нет записей для скачивания.");
+        return;
+    }
+    const textContent = promptLogs.map(log => `[${log.timestamp}] [${log.mode.toUpperCase()}]: ${log.prompt}`).join('\n\n');
+    const blob = new Blob([textContent], { type: 'text/plain' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `prompt_log_${Date.now()}.txt`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
 
   const getCoords = (e: MouseEvent | TouchEvent, canvas: HTMLCanvasElement): {x: number, y: number} | null => {
     if (!canvas) return null;
@@ -199,27 +250,95 @@ if (appContainer) {
     });
   }
 
+  const generateFilenameFromPrompt = (prompt: string): string => {
+      if (!prompt) return `img_${Date.now()}`;
+      
+      // 1. Transliterate Cyrillic to Latin
+      let processed = prompt.toLowerCase();
+      let transliterated = '';
+      for (const char of processed) {
+          transliterated += cyrillicToLatinMap[char] || char;
+      }
+      processed = transliterated;
+
+      // 2. Clean up: remove non-alphanumeric (except spaces and hyphens)
+      //    Keep standard English letters and numbers
+      let cleaned = processed.replace(/[^a-z0-9\s-]/g, '').trim();
+      
+      // 3. Replace spaces with underscores
+      cleaned = cleaned.replace(/\s+/g, '_');
+      
+      // 4. Truncate to avoid extremely long filenames
+      if (cleaned.length > 30) {
+          cleaned = cleaned.substring(0, 30);
+      }
+      
+      // 5. Fallback if cleaned string is empty (e.g. prompt was only symbols)
+      if (!cleaned) {
+          return `img_${Date.now()}`;
+      }
+      
+      return cleaned;
+  };
+
+  // Helper to force any base64 image data into a high-quality PNG base64 string
+  const convertToPngBase64 = (data: string, mimeType: string): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+                reject(new Error("Could not get canvas context for PNG conversion"));
+                return;
+            }
+            ctx.drawImage(img, 0, 0);
+            
+            // Force PNG output with max quality
+            const pngDataUrl = canvas.toDataURL('image/png', 1.0);
+            // Return only the base64 part
+            resolve(pngDataUrl.split(',')[1]); 
+        };
+        img.onerror = (err) => reject(new Error("Failed to load image for PNG conversion"));
+        img.src = `data:${mimeType};base64,${data}`;
+    });
+  };
+
+  // Helper function to convert ImagePart (potentially JPEG base64) to a true PNG Blob via Canvas
+  const convertPartToPngBlob = async (imagePart: ImagePart): Promise<Blob> => {
+      return new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => {
+              const canvas = document.createElement('canvas');
+              canvas.width = img.naturalWidth;
+              canvas.height = img.naturalHeight;
+              const ctx = canvas.getContext('2d');
+              if (!ctx) {
+                  reject(new Error("Could not get canvas context for PNG conversion"));
+                  return;
+              }
+              ctx.drawImage(img, 0, 0);
+              
+              // Ensure highest quality (1.0) PNG export
+              canvas.toBlob((blob) => {
+                  if (blob) {
+                      resolve(blob);
+                  } else {
+                      reject(new Error("Canvas toBlob failed"));
+                  }
+              }, 'image/png', 1.0); 
+          };
+          img.onerror = (err) => reject(new Error("Failed to load image for PNG conversion"));
+          img.src = `data:${imagePart.mimeType};base64,${imagePart.data}`;
+      });
+  };
+
   const copyImageToClipboard = async (imagePart: ImagePart) => {
     try {
-        const img = new Image();
-        img.src = `data:${imagePart.mimeType};base64,${imagePart.data}`;
-        
-        await new Promise((resolve, reject) => {
-            img.onload = resolve;
-            img.onerror = reject;
-        });
-
-        const canvas = document.createElement('canvas');
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) throw new Error("Could not get canvas context");
-        
-        ctx.drawImage(img, 0, 0);
-        
-        const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
-        if (!blob) throw new Error("Failed to create blob");
-
+        // Use convertPartToPngBlob to ensure high quality PNG blob
+        const blob = await convertPartToPngBlob(imagePart);
         await navigator.clipboard.write([new ClipboardItem({'image/png': blob})]);
         return true;
     } catch (err) {
@@ -366,6 +485,20 @@ if (appContainer) {
         case '1:1': default: return { width: 1024, height: 1024 };
     }
   };
+
+  const updateModelButtonsUI = () => {
+      if (modelButtons) {
+          modelButtons.forEach(btn => {
+              if (btn.dataset.model === selectedGenerationModel) {
+                  btn.classList.add('active');
+                  btn.setAttribute('aria-pressed', 'true');
+              } else {
+                  btn.classList.remove('active');
+                  btn.setAttribute('aria-pressed', 'false');
+              }
+          });
+      }
+  }
 
 
   // --- UI LOGIC ---
@@ -665,6 +798,12 @@ if (appContainer) {
         finalPrompt += `. Avoid the following: ${negativePrompt}`;
     }
 
+    // --- LOG PROMPT ---
+    logPrompt(currentMode, finalPrompt);
+
+    // Generate filename based on prompt with transliteration
+    const generatedFilename = generateFilenameFromPrompt(finalPrompt);
+
     generateBtn.disabled = true;
     hideComparisonView();
     resultContainer?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -717,7 +856,12 @@ if (appContainer) {
       // ------------------------------------------------------------------
 
       if (currentMode === 'lighting') {
-          currentModelName = 'gemini-3-pro-image-preview';
+          // Use selected model from state, defaulting to Pro if unexpected
+          if (selectedGenerationModel.includes('imagen')) {
+               currentModelName = 'gemini-3-pro-image-preview'; // Fallback
+          } else {
+               currentModelName = selectedGenerationModel; // 'gemini-3-pro-image-preview' or 'gemini-2.5-flash-image'
+          }
           generationAPI = 'generateContent';
           
           let intensityPrompt = "";
@@ -800,8 +944,12 @@ if (appContainer) {
       else if (currentMode === 'free') {
           // Free mode logic
           if (referenceImages.length > 0) {
-             // Use Gemini 3 Pro if references are present (Variation/Editing flow)
-              currentModelName = 'gemini-3-pro-image-preview'; 
+             // Use Selected Gemini Model if references are present (Variation/Editing flow)
+              if (selectedGenerationModel.includes('imagen')) {
+                   currentModelName = 'gemini-3-pro-image-preview'; // Fallback if Imagen selected with refs
+              } else {
+                   currentModelName = selectedGenerationModel;
+              }
               generationAPI = 'generateContent';
               const allParts: (object)[] = [];
               const referenceImageParts = processedReferenceImages.map(refImg => ({
@@ -822,9 +970,9 @@ if (appContainer) {
 
           } else {
               // Standard text-to-image with Model Selection
-              if (selectedGenerationModel === 'gemini-3-pro-image-preview') {
+              if (selectedGenerationModel === 'gemini-3-pro-image-preview' || selectedGenerationModel === 'gemini-2.5-flash-image') {
                   // Text-to-Image via Gemini
-                  currentModelName = 'gemini-3-pro-image-preview';
+                  currentModelName = selectedGenerationModel;
                   generationAPI = 'generateContent';
                    apiRequestPayload = {
                       model: currentModelName,
@@ -852,7 +1000,14 @@ if (appContainer) {
           }
       } else {
           // Character, Match3, Inpaint, Sketch, Concepting
-          currentModelName = 'gemini-3-pro-image-preview'; 
+          
+          // Use selected model from state, defaulting to Pro if unexpected or Imagen (since Imagen is T2I)
+          if (selectedGenerationModel.includes('imagen')) {
+              currentModelName = 'gemini-3-pro-image-preview';
+          } else {
+              currentModelName = selectedGenerationModel;
+          }
+          
           generationAPI = 'generateContent';
           const allParts: (object)[] = [];
 
@@ -945,9 +1100,12 @@ if (appContainer) {
                           const imagePartFound = response.candidates?.[0]?.content.parts.find(part => part.inlineData);
                           if (imagePartFound?.inlineData) {
                               if (resultImages.length < activeGenCount) {
+                                  // IMMEDIATE PNG CONVERSION HERE
+                                  const pngData = await convertToPngBase64(imagePartFound.inlineData.data, imagePartFound.inlineData.mimeType);
                                   resultImages.push({
-                                      mimeType: imagePartFound.inlineData.mimeType,
-                                      data: imagePartFound.inlineData.data,
+                                      mimeType: 'image/png', // Force PNG MIME type
+                                      data: pngData,         // Use converted PNG data
+                                      filename: generatedFilename 
                                   });
                               }
                           }
@@ -963,9 +1121,12 @@ if (appContainer) {
                   if (response.generatedImages) {
                       for (const genImage of response.generatedImages) {
                           if (genImage.image?.imageBytes && resultImages.length < activeGenCount) {
+                              // IMMEDIATE PNG CONVERSION HERE (Even for Imagen, for consistency/quality)
+                              const pngData = await convertToPngBase64(genImage.image.imageBytes, 'image/png');
                               resultImages.push({
                                   mimeType: 'image/png',
-                                  data: genImage.image.imageBytes,
+                                  data: pngData,
+                                  filename: generatedFilename 
                               });
                           }
                       }
@@ -1212,32 +1373,64 @@ if (appContainer) {
 
   const handleDownloadSelected = async () => {
     if (!downloadSelectedBtn || selectedHistoryIndices.size === 0) return;
-    const prefix = filenamePrefixInput?.value.trim() || 'image';
+    const prefixInput = filenamePrefixInput?.value.trim();
     downloadSelectedBtn.disabled = true;
 
-    if (selectedHistoryIndices.size === 1) {
-        downloadSelectedBtn.textContent = 'Загрузка...';
-        const index = selectedHistoryIndices.values().next().value;
-        const imagePart = history[index];
-        const link = document.createElement('a');
-        link.href = `data:${imagePart.mimeType};base64,${imagePart.data}`;
-        link.download = `${prefix}.png`;
-        link.click();
-    } else {
-        downloadSelectedBtn.textContent = 'Архивация...';
-        const zip = new JSZip();
-        let count = 1;
-        selectedHistoryIndices.forEach(index => {
-            zip.file(`${prefix}_${count++}.png`, history[index].data, { base64: true });
-        });
-        const content = await zip.generateAsync({ type: "blob" });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(content);
-        link.download = `${prefix}.zip`;
-        link.click();
+    try {
+        if (selectedHistoryIndices.size === 1) {
+            downloadSelectedBtn.textContent = 'Загрузка...';
+            const index = selectedHistoryIndices.values().next().value;
+            const imagePart = history[index];
+            
+            // Use auto-generated filename based on prompt if prefix is not provided
+            const filename = prefixInput || imagePart.filename || 'generated_image';
+            
+            // Convert to true PNG blob (ensures extension matches content and high quality)
+            const blob = await convertPartToPngBlob(imagePart);
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `${filename}.png`;
+            link.click();
+            URL.revokeObjectURL(link.href);
+        } else {
+            downloadSelectedBtn.textContent = 'Архивация...';
+            const zip = new JSZip();
+            
+            // Track filename usage to handle duplicates in zip
+            const nameCount: Record<string, number> = {};
+            
+            // Convert all selected images to PNG blobs sequentially
+            const indices = Array.from(selectedHistoryIndices);
+            for (const index of indices) {
+                 const imagePart = history[index];
+                 let baseName = prefixInput || imagePart.filename || 'image';
+                 
+                 // Handle duplicates
+                 if (nameCount[baseName]) {
+                     nameCount[baseName]++;
+                     baseName = `${baseName}_${nameCount[baseName]}`;
+                 } else {
+                     nameCount[baseName] = 1;
+                 }
+                 
+                 const blob = await convertPartToPngBlob(imagePart);
+                 zip.file(`${baseName}.png`, blob);
+            }
+
+            const content = await zip.generateAsync({ type: "blob" });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(content);
+            link.download = `${prefixInput || 'images'}.zip`;
+            link.click();
+            URL.revokeObjectURL(link.href);
+        }
+    } catch (err) {
+        console.error("Download failed:", err);
+        alert("Download failed. See console for details.");
+    } finally {
+        downloadSelectedBtn.textContent = 'Загрузить выбранное';
+        downloadSelectedBtn.disabled = false;
     }
-    downloadSelectedBtn.textContent = 'Загрузить выбранное';
-    downloadSelectedBtn.disabled = false;
   };
 
   const openGalleryModal = () => {
@@ -1275,6 +1468,7 @@ if (appContainer) {
         const imagePart = history[i];
         const historyItem = document.createElement('button');
         historyItem.className = 'history-item';
+        historyItem.title = imagePart.filename || 'Image'; // Show filename on hover
         historyItem.onclick = () => openModal(history, i);
         historyItem.draggable = true;
         historyItem.addEventListener('dragstart', (e) => {
@@ -1468,13 +1662,8 @@ if (appContainer) {
     if (modelButtons) {
         modelButtons.forEach(button => {
             button.addEventListener('click', () => {
-                selectedGenerationModel = button.dataset.model || 'imagen-4.0-generate-001';
-                modelButtons.forEach(btn => {
-                    btn.classList.remove('active');
-                    btn.setAttribute('aria-pressed', 'false');
-                });
-                button.classList.add('active');
-                button.setAttribute('aria-pressed', 'true');
+                selectedGenerationModel = button.dataset.model || 'gemini-3-pro-image-preview';
+                updateModelButtonsUI();
             });
         });
     }
@@ -1554,8 +1743,10 @@ if (appContainer) {
         target.setAttribute('aria-selected', 'true');
 
         const isFQA = mode === 'fqa';
+        const isAnalyze = mode === 'analyze';
         const isLighting = mode === 'lighting';
         const isFree = mode === 'free';
+        const isEditingMode = ['character', 'concepting', 'sketch', 'inpaint', 'lighting', 'match3'].includes(mode);
 
         // --- Logic for Generation Count Visibility ---
         const countBtn5 = appContainer.querySelector('.num-btn[data-count="5"]');
@@ -1568,11 +1759,30 @@ if (appContainer) {
                 numButtons.forEach(btn => btn.classList.remove('active'));
                 appContainer.querySelector('.num-btn[data-count="4"]')?.classList.add('active');
             }
-            if (generationModelSelector) generationModelSelector.classList.remove('hidden'); // Show Model Selector
         } else {
             countBtn5?.classList.remove('hidden');
             countBtn6?.classList.remove('hidden');
-            if (generationModelSelector) generationModelSelector.classList.add('hidden'); // Hide Model Selector
+        }
+
+        // --- Logic for Model Selector Visibility ---
+        if (generationModelSelector) {
+            if (isFree || isEditingMode) {
+                generationModelSelector.classList.remove('hidden');
+                
+                // Toggle Imagen buttons based on mode
+                document.querySelectorAll('.imagen-btn').forEach(btn => {
+                    btn.classList.toggle('hidden', !isFree);
+                });
+
+                // If entering editing mode and an Imagen model is selected, reset to Nano Banana Pro
+                if (isEditingMode && selectedGenerationModel.includes('imagen')) {
+                    selectedGenerationModel = 'gemini-3-pro-image-preview';
+                    updateModelButtonsUI();
+                }
+
+            } else {
+                generationModelSelector.classList.add('hidden');
+            }
         }
 
 
@@ -1603,10 +1813,10 @@ if (appContainer) {
             inpaintControls?.classList.toggle('hidden', !showInpaintControls);
             aspectRatioSelector?.classList.toggle('hidden', !showAspectRatio);
             
-            referenceUploadArea.classList.toggle('hidden', mode === 'analyze');
-            negativePromptContainer?.classList.toggle('hidden', mode === 'analyze' || isLighting);
-            creativitySliderContainer?.classList.toggle('hidden', mode === 'analyze' || isLighting);
-            generationCountSelector?.classList.toggle('hidden', mode === 'analyze');
+            referenceUploadArea.classList.toggle('hidden', isAnalyze);
+            negativePromptContainer?.classList.toggle('hidden', isAnalyze || isLighting);
+            creativitySliderContainer?.classList.toggle('hidden', isAnalyze || isLighting);
+            generationCountSelector?.classList.toggle('hidden', isAnalyze);
             lightingControlsContainer?.classList.toggle('hidden', !showLightingControls);
             imageOverlayControls.classList.toggle('hidden', !supportsComparison);
             
@@ -1793,6 +2003,7 @@ if (appContainer) {
       galleryBtn.addEventListener('click', openGalleryModal);
       closeGalleryBtn.addEventListener('click', () => galleryModal.classList.add('modal-hidden'));
       downloadSelectedBtn.addEventListener('click', handleDownloadSelected);
+      if (downloadLogBtn) downloadLogBtn.addEventListener('click', handleDownloadLog);
       galleryModal.addEventListener('click', (e) => {
           if (e.target === galleryModal) galleryModal.classList.add('modal-hidden');
       });

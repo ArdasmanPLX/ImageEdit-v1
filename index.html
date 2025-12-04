@@ -21,6 +21,7 @@
             <h2>История</h2>
             <div id="history-gallery"></div>
             <button id="gallery-btn" class="gallery-button">Галерея</button>
+            <button id="download-log-btn" class="gallery-button" style="margin-top: 0.5rem; border-color: #666; color: #ccc;">Скачать лог команд</button>
         </aside>
         <main>
             <h1>PLAYRIX AI Image Editor v.2.2</h1>
@@ -280,9 +281,10 @@
                     <div id="generation-model-selector" class="hidden">
                         <label id="gen-model-label">Model:</label>
                         <div role="group" aria-labelledby="gen-model-label">
-                            <button class="model-btn" data-model="gemini-3-pro-image-preview">Gemini 3 Pro</button>
-                            <button class="model-btn active" data-model="imagen-4.0-generate-001" aria-pressed="true">Imagen 4.0</button>
-                            <button class="model-btn" data-model="imagen-4.0-generate-ultra">Imagen 4.0 Ultra</button>
+                            <button class="model-btn active" data-model="gemini-2.5-flash-image" aria-pressed="true">Nano Banana</button>
+                            <button class="model-btn" data-model="gemini-3-pro-image-preview" aria-pressed="false">Nano Banana Pro</button>
+                            <button class="model-btn imagen-btn" data-model="imagen-4.0-generate-001">Imagen 4.0</button>
+                            <button class="model-btn imagen-btn" data-model="imagen-4.0-generate-ultra">Imagen 4.0 Ultra</button>
                         </div>
                     </div>
 
@@ -401,6 +403,5 @@
 
     <div id="brush-cursor" class="hidden"></div>
     <script type="module" src="index.tsx"></script>
-<script type="module" src="/index.tsx"></script>
 </body>
 </html>
